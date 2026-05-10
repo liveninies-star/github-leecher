@@ -1,11 +1,17 @@
 # Crawl Summary – Full Browser PDF
 
-- Start URL: youtube.com/home
-- Max depth: 0
-- Pages converted: 0
-- Date: 2026-05-10 14:11:44
+- Start URL: https://youtube.com
+- Max depth: 1
+- Pages converted: 6
+- Date: 2026-05-10 14:20:22
 
 ## PDF files
 - t.me_Filtereshekan.pdf (112.5 KB)
 - t.me_moladz_by_official.pdf (43.5 KB)
 - t.me_s_Filtereshekan.pdf (331.7 KB)
+- youtube.com_index.pdf (74.0 KB)
+- youtube.com_new.pdf (507.6 KB)
+- youtube.com_t_contact_us_index.pdf (82.9 KB)
+- youtube.com_t_privacy.pdf (461.7 KB)
+- youtube.com_t_terms.pdf (201.2 KB)
+- youtube.comindex.pdf (74.0 KB)
