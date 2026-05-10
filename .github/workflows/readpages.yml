@@ -1,4 +1,4 @@
-name: Crawl & Leech Web Pages (PDF Output)
+name: Crawl & Leech Web Pages (PDF Output - Fixed)
 
 on:
   workflow_dispatch:
@@ -23,10 +23,6 @@ on:
         description: 'Only follow links on same domain? (true/false)'
         required: false
         default: 'true'
-      pdf_timeout:
-        description: 'Seconds to wait for page to load (for JS-heavy sites)'
-        required: false
-        default: '30'
 
 jobs:
   crawl:
@@ -47,7 +43,8 @@ jobs:
         run: |
           pip install requests beautifulsoup4 urllib3 playwright
           playwright install chromium
-          playwright install-deps
+          sudo apt-get update
+          sudo apt-get install -y libgbm1 libasound2
 
       - name: Run crawler with PDF generation
         env:
@@ -56,27 +53,23 @@ jobs:
           MAX_PAGES: ${{ github.event.inputs.max_pages }}
           LINK_PATTERN: ${{ github.event.inputs.link_pattern }}
           SAME_DOMAIN_ONLY: ${{ github.event.inputs.same_domain_only }}
-          PDF_TIMEOUT: ${{ github.event.inputs.pdf_timeout }}
         run: |
           python - << 'EOF'
-          import os, re, time, hashlib, asyncio
+          import os, re, time, hashlib
           import requests
           from urllib.parse import urljoin, urlparse
           from bs4 import BeautifulSoup
           from collections import deque
-          from playwright.async_api import async_playwright
+          from playwright.sync_api import sync_playwright
           
           start_url = os.environ['START_URL']
           max_depth = int(os.environ['MAX_DEPTH'])
           max_pages = int(os.environ['MAX_PAGES'])
           link_pattern = os.environ.get('LINK_PATTERN', '')
           same_domain_only = os.environ.get('SAME_DOMAIN_ONLY', 'true').lower() == 'true'
-          pdf_timeout = int(os.environ.get('PDF_TIMEOUT', '30'))
           
-          # Create download directories
-          html_dir = "temp_html"
+          # Create directories
           pdf_dir = "downloaded_pdfs"
-          os.makedirs(html_dir, exist_ok=True)
           os.makedirs(pdf_dir, exist_ok=True)
           
           visited = set()
@@ -95,16 +88,6 @@ jobs:
               if len(name) > 200:
                   name = hashlib.md5(url.encode()).hexdigest()
               return f"{pdf_dir}/{name}.pdf"
-          
-          def get_html_filename(url):
-              parsed = urlparse(url)
-              path = parsed.path if parsed.path else "index"
-              if path.endswith('/'):
-                  path += "index"
-              name = f"{parsed.netloc}{path}".replace('/', '_').replace('?', '_').replace('=', '_')
-              if len(name) > 200:
-                  name = hashlib.md5(url.encode()).hexdigest()
-              return f"{html_dir}/{name}.html"
           
           def should_follow(link):
               if not link:
@@ -133,51 +116,12 @@ jobs:
                   links.append(clean_url)
               return links
           
-          async def url_to_pdf(url, pdf_path, html_path, timeout_seconds):
-              """Render URL in real browser and save as PDF"""
-              async with async_playwright() as p:
-                  browser = await p.chromium.launch(headless=True)
-                  page = await browser.new_page()
-                  
-                  try:
-                      # Navigate to URL
-                      await page.goto(url, wait_until='networkidle', timeout=timeout_seconds * 1000)
-                      
-                      # Optional: wait a bit more for lazy-loaded content
-                      await page.wait_for_timeout(2000)
-                      
-                      # Save HTML as backup
-                      html_content = await page.content()
-                      with open(html_path, 'w', encoding='utf-8') as f:
-                          f.write(html_content)
-                      
-                      # Generate PDF
-                      await page.pdf(
-                          path=pdf_path,
-                          format='A4',
-                          print_background=True,
-                          margin={
-                              'top': '0.5in',
-                              'bottom': '0.5in',
-                              'left': '0.5in',
-                              'right': '0.5in'
-                          }
-                      )
-                      
-                      await browser.close()
-                      return True
-                      
-                  except Exception as e:
-                      print(f"    PDF generation error: {e}")
-                      await browser.close()
-                      return False
+          print(f"Starting crawl: {start_url}")
+          print(f"Max depth: {max_depth}, Max pages: {max_pages}")
           
-          async def crawl_and_convert():
-              nonlocal downloaded
-              
-              print(f"🚀 Starting crawl: {start_url}")
-              print(f"📊 Max depth: {max_depth}, Max pages: {max_pages}")
-              print(f"⏱️  PDF timeout: {pdf_timeout}s")
+          # Initialize Playwright
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
               
               while queue and downloaded < max_pages:
                   url, depth = queue.popleft()
@@ -187,10 +131,10 @@ jobs:
                   if depth > max_depth:
                       continue
                   
-                  print(f"\n📄 [{downloaded+1}/{max_pages}] Depth {depth}: {url}")
+                  print(f"[{downloaded+1}/{max_pages}] Depth {depth}: {url}")
                   
                   try:
-                      # First fetch HTML to extract links (faster than browser)
+                      # First fetch HTML to extract links (faster)
                       resp = requests.get(url, headers=headers, timeout=30)
                       resp.raise_for_status()
                       content = resp.text
@@ -202,63 +146,54 @@ jobs:
                               if link not in visited and should_follow(link):
                                   queue.append((link, depth + 1))
                       
-                      # Now generate PDF with full rendering
-                      pdf_filename = get_pdf_filename(url)
-                      html_filename = get_html_filename(url)
-                      
-                      print(f"  🎨 Rendering to PDF...")
-                      success = await url_to_pdf(url, pdf_filename, html_filename, pdf_timeout)
-                      
-                      if success:
+                      # Generate PDF with browser
+                      print(f"  Rendering to PDF...")
+                      page = browser.new_page()
+                      try:
+                          page.goto(url, wait_until='networkidle', timeout=30000)
+                          page.wait_for_timeout(2000)  # Extra wait for lazy content
+                          
+                          pdf_filename = get_pdf_filename(url)
+                          page.pdf(path=pdf_filename, format='A4', print_background=True)
+                          
                           print(f"  ✅ Saved: {os.path.basename(pdf_filename)}")
                           downloaded += 1
-                      else:
-                          print(f"  ⚠️  PDF failed, HTML saved as backup")
-                          # Still count it if HTML was saved
-                          if os.path.exists(html_filename):
-                              downloaded += 1
+                          
+                      except Exception as pdf_err:
+                          print(f"  ❌ PDF failed: {pdf_err}")
+                      finally:
+                          page.close()
                       
                       visited.add(url)
                       
                   except Exception as e:
-                      print(f"  ❌ Failed: {e}")
+                      print(f"  ❌ Failed to fetch: {e}")
                       continue
                   
-                  # Polite delay
-                  time.sleep(1)
+                  time.sleep(1)  # Polite delay
               
-              print(f"\n✨ Crawl completed! Converted {downloaded} pages to PDF.")
+              browser.close()
           
-          # Run the async crawler
-          asyncio.run(crawl_and_convert())
-          
-          # Create summary with PDF links
+          # Create summary
           summary = f"""# Crawl Summary (PDF Format)
           
-          ## Details
-          - **Start URL**: {start_url}
-          - **Max depth**: {max_depth}
-          - **Pages converted to PDF**: {downloaded}
-          - **Timestamp**: {time.strftime('%Y-%m-%d %H:%M:%S')}
+          - Start URL: {start_url}
+          - Max depth: {max_depth}
+          - Pages converted: {downloaded}
+          - Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}
           
-          ## Downloaded PDF Files
+          ## PDF Files Downloaded
           
           """
           for f in sorted(os.listdir(pdf_dir)):
               if f.endswith('.pdf'):
                   size_kb = os.path.getsize(f"{pdf_dir}/{f}") / 1024
-                  summary += f"- [{f}]({pdf_dir}/{f}) ({size_kb:.1f} KB)\n"
-          
-          summary += f"\n## Total Pages: {len([f for f in os.listdir(pdf_dir) if f.endswith('.pdf')])}\n"
+                  summary += f"- {f} ({size_kb:.1f} KB)\n"
           
           with open("crawl_summary.md", "w") as sf:
               sf.write(summary)
           
-          # Clean up temp HTML files (optional - remove this if you want to keep HTML backups)
-          import shutil
-          shutil.rmtree(html_dir)
-          print(f"\n🗑️  Temporary HTML files cleaned up")
-          print(f"📁 PDFs saved in '{pdf_dir}' folder")
+          print(f"\n✅ Crawl completed. Saved {downloaded} PDFs.")
           EOF
 
       - name: Commit and push PDF files
