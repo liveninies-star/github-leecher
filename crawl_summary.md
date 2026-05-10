@@ -1,44 +1,9 @@
-# Crawl Summary
-- Start URL: https://t.me/moladz_by_official
-- Max depth: 2
-- Pages downloaded: 37
-- Timestamp: 2026-05-10 09:22:32
+# Crawl Summary – Full Browser PDF
 
-## Downloaded files
-- t.me_MinskTourism_5947.html
-- t.me_MinskTourism_6086.html
-- t.me_MinskTourism_6123.html
-- t.me_blago_edu.html
-- t.me_minsk_kuda_944.html
-- t.me_moladz_by_bot.html
-- t.me_moladz_by_official.html
-- t.me_moladz_by_official_18823.html
-- t.me_moladz_by_official_20109.html
-- t.me_moladz_by_official_20425.html
-- t.me_moladz_by_official_20434.html
-- t.me_moladz_by_official_20441.html
-- t.me_moladz_by_official_20445.html
-- t.me_moladz_by_official_20454.html
-- t.me_moladz_by_official_20455.html
-- t.me_moladz_by_official_20456.html
-- t.me_moladz_by_official_20457.html
-- t.me_moladz_by_official_20458.html
-- t.me_moladz_by_official_20459.html
-- t.me_moladz_by_official_20460.html
-- t.me_moladz_by_official_20461.html
-- t.me_moladz_by_official_20462.html
-- t.me_moladz_by_official_20463.html
-- t.me_moladz_by_official_20464.html
-- t.me_moladz_by_official_20465.html
-- t.me_moladz_by_official_20466.html
-- t.me_moladz_by_official_20467.html
-- t.me_moladz_by_official_20468.html
-- t.me_moladz_by_official_20469.html
-- t.me_moladz_by_official_20470.html
-- t.me_moladz_by_official_20471.html
-- t.me_moladz_by_official_20472.html
-- t.me_moladz_by_official_20473.html
-- t.me_moladz_by_official_20474.html
-- t.me_moladz_by_official_20475.html
-- t.me_rvcvolunteers.html
-- t.me_s_moladz_by_official.html
+- Start URL: https://t.me/Filtereshekan
+- Max depth: 0
+- Pages converted: 1
+- Date: 2026-05-10 09:50:58
+
+## PDF files
+- t.me_Filtereshekan.pdf (112.7 KB)
