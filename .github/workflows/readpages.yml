@@ -43,9 +43,9 @@ jobs:
         run: |
           pip install requests beautifulsoup4 playwright
 
-      - name: Install Playwright browsers with all dependencies (CRITICAL)
-        uses: microsoft/playwright-github-action@v1
-        # This official action installs Chromium + all system libraries automatically
+      - name: Install Playwright browsers with system dependencies (official method)
+        run: |
+          npx playwright install --with-deps chromium
 
       - name: Run crawler and generate PDFs
         env:
@@ -104,7 +104,6 @@ jobs:
               for a in soup.find_all('a', href=True):
                   href = a['href']
                   abs_url = urljoin(base_url, href)
-                  # Skip non-html files
                   skip_ext = ('.jpg','.jpeg','.png','.gif','.pdf','.zip','.mp4','.mp3','.css','.js','.ico','.svg')
                   if urlparse(abs_url).path.lower().endswith(skip_ext):
                       continue
@@ -112,11 +111,10 @@ jobs:
                   links.append(clean)
               return list(set(links))
 
-          print(f"🚀 Starting crawl: {start_url}")
-          print(f"📏 Max depth: {max_depth}, 🧾 Max pages: {max_pages}")
+          print(f"Starting crawl: {start_url}")
+          print(f"Max depth: {max_depth}, Max pages: {max_pages}")
 
           with sync_playwright() as p:
-              # Launch browser once for all pages (saves time)
               browser = p.chromium.launch(headless=True)
               
               while queue and downloaded < max_pages:
@@ -124,15 +122,15 @@ jobs:
                   if url in visited or depth > max_depth:
                       continue
 
-                  print(f"\n[{downloaded+1}/{max_pages}] Depth {depth}: {url}")
+                  print(f"[{downloaded+1}/{max_pages}] Depth {depth}: {url}")
 
-                  # ---- Step 1: Download HTML to extract links (fast) ----
+                  # Fetch HTML to extract links
                   try:
                       resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
                       resp.raise_for_status()
                       html = resp.text
                   except Exception as e:
-                      print(f"  ⚠️ Failed to fetch HTML: {e}")
+                      print(f"  Failed to fetch HTML: {e}")
                       continue
 
                   # Extract new links
@@ -142,36 +140,35 @@ jobs:
                           if link not in visited and should_follow(link):
                               queue.append((link, depth+1))
 
-                  # ---- Step 2: Render page in real browser and save PDF ----
+                  # Render page and save PDF
                   pdf_path = safe_filename(url)
                   page = browser.new_page()
                   try:
-                      print(f"  🎨 Rendering with Chromium...")
+                      print(f"  Rendering with Chromium...")
                       page.goto(url, wait_until='networkidle', timeout=45000)
-                      page.wait_for_timeout(2000)  # extra for lazy content
+                      page.wait_for_timeout(2000)
                       page.pdf(path=pdf_path, format='A4', print_background=True)
-                      print(f"  ✅ PDF saved: {os.path.basename(pdf_path)}")
+                      print(f"  Saved: {os.path.basename(pdf_path)}")
                       downloaded += 1
                   except Exception as e:
-                      print(f"  ❌ PDF generation error: {e}")
+                      print(f"  PDF error: {e}")
                   finally:
                       page.close()
 
                   visited.add(url)
-                  time.sleep(1)  # politeness
+                  time.sleep(1)
 
               browser.close()
 
           # Create summary
           summary = f"""# Crawl Summary – Full Browser PDF
 
-          - **Start URL**: {start_url}
-          - **Max depth**: {max_depth}
-          - **Pages converted**: {downloaded}
-          - **Date**: {time.strftime('%Y-%m-%d %H:%M:%S')}
+          - Start URL: {start_url}
+          - Max depth: {max_depth}
+          - Pages converted: {downloaded}
+          - Date: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
           ## PDF files
-
           """
           for f in sorted(os.listdir(PDF_DIR)):
               if f.endswith('.pdf'):
@@ -181,7 +178,7 @@ jobs:
           with open("crawl_summary.md", "w") as sf:
               sf.write(summary)
 
-          print(f"\n✅ Done. Saved {downloaded} PDFs to '{PDF_DIR}'")
+          print(f"Done. Saved {downloaded} PDFs to '{PDF_DIR}'")
           EOF
 
       - name: Commit and push PDFs
