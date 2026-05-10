@@ -1,0 +1,186 @@
+name: Crawl & Leech Web Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_url:
+        description: 'Starting URL to crawl'
+        required: true
+        default: 'https://example.com/projects'
+      max_depth:
+        description: 'Maximum crawl depth (0 = only start URL)'
+        required: true
+        default: '2'
+      max_pages:
+        description: 'Maximum total pages to download'
+        required: true
+        default: '50'
+      link_pattern:
+        description: 'Regex pattern for links to follow (e.g., /project/.*)'
+        required: false
+        default: ''
+      same_domain_only:
+        description: 'Only follow links on same domain? (true/false)'
+        required: false
+        default: 'true'
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # To commit downloaded files
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4 urllib3
+
+      - name: Run crawler
+        env:
+          START_URL: ${{ github.event.inputs.start_url }}
+          MAX_DEPTH: ${{ github.event.inputs.max_depth }}
+          MAX_PAGES: ${{ github.event.inputs.max_pages }}
+          LINK_PATTERN: ${{ github.event.inputs.link_pattern }}
+          SAME_DOMAIN_ONLY: ${{ github.event.inputs.same_domain_only }}
+        run: |
+          python - << 'EOF'
+          import os, re, time, hashlib
+          import requests
+          from urllib.parse import urljoin, urlparse
+          from bs4 import BeautifulSoup
+          from collections import deque
+
+          start_url = os.environ['START_URL']
+          max_depth = int(os.environ['MAX_DEPTH'])
+          max_pages = int(os.environ['MAX_PAGES'])
+          link_pattern = os.environ.get('LINK_PATTERN', '')
+          same_domain_only = os.environ.get('SAME_DOMAIN_ONLY', 'true').lower() == 'true'
+          
+          # Create download directory
+          download_dir = "downloaded_pages"
+          os.makedirs(download_dir, exist_ok=True)
+          
+          visited = set()
+          queue = deque([(start_url, 0)])  # (url, depth)
+          downloaded = 0
+          
+          # Get domain of start URL for filtering
+          start_domain = urlparse(start_url).netloc
+          
+          headers = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+          
+          def get_filename(url):
+              # Create safe filename from URL
+              parsed = urlparse(url)
+              path = parsed.path if parsed.path else "index"
+              if path.endswith('/'):
+                  path += "index"
+              name = f"{parsed.netloc}{path}".replace('/', '_').replace('?', '_').replace('=', '_')
+              # Limit length
+              if len(name) > 200:
+                  name = hashlib.md5(url.encode()).hexdigest()
+              return f"{download_dir}/{name}.html"
+          
+          def should_follow(link):
+              if not link:
+                  return False
+              if same_domain_only:
+                  link_domain = urlparse(link).netloc
+                  if link_domain != start_domain:
+                      return False
+              if link_pattern:
+                  if not re.search(link_pattern, link):
+                      return False
+              return True
+          
+          def extract_links(html, base_url):
+              soup = BeautifulSoup(html, 'html.parser')
+              links = []
+              for a in soup.find_all('a', href=True):
+                  href = a['href']
+                  absolute_url = urljoin(base_url, href)
+                  parsed = urlparse(absolute_url)
+                  # Skip common non-page files
+                  skip_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.pdf', '.zip', '.mp4', '.mp3', '.css', '.js')
+                  if parsed.path.lower().endswith(skip_extensions):
+                      continue
+                  # Remove fragments and query strings for dedup
+                  clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                  links.append(clean_url)
+              return links
+          
+          print(f"Starting crawl: {start_url}")
+          print(f"Max depth: {max_depth}, Max pages: {max_pages}")
+          
+          while queue and downloaded < max_pages:
+              url, depth = queue.popleft()
+              
+              if url in visited:
+                  continue
+              if depth > max_depth:
+                  continue
+              
+              print(f"[{downloaded+1}/{max_pages}] Depth {depth}: {url}")
+              
+              try:
+                  resp = requests.get(url, headers=headers, timeout=30)
+                  resp.raise_for_status()
+                  content = resp.text
+                  
+                  # Save HTML file
+                  filename = get_filename(url)
+                  with open(filename, 'w', encoding='utf-8') as f:
+                      f.write(content)
+                  downloaded += 1
+                  visited.add(url)
+                  
+                  # Extract and queue links if not at max depth
+                  if depth < max_depth:
+                      new_links = extract_links(content, url)
+                      for link in new_links:
+                          if link not in visited and should_follow(link):
+                              queue.append((link, depth + 1))
+                      
+              except Exception as e:
+                  print(f"  Failed: {e}")
+                  continue
+              
+              # Polite delay
+              time.sleep(1)
+          
+          # Create summary file
+          summary = f"""# Crawl Summary
+          - Start URL: {start_url}
+          - Max depth: {max_depth}
+          - Pages downloaded: {downloaded}
+          - Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}
+          
+          ## Downloaded files
+          """
+          for f in sorted(os.listdir(download_dir)):
+              if f.endswith('.html'):
+                  summary += f"- {f}\n"
+          
+          with open("crawl_summary.md", "w") as sf:
+              sf.write(summary)
+          
+          print(f"\n✅ Crawl completed. Downloaded {downloaded} pages.")
+          EOF
+
+      - name: Commit and push downloaded pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add downloaded_pages/ crawl_summary.md
+          git diff --cached --quiet || git commit -m "Add crawled pages from ${{ github.event.inputs.start_url }}"
+          git push
