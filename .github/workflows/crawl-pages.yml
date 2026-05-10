@@ -1,4 +1,4 @@
-name: Crawl & Leech Web Pages
+name: Crawl & Leech - Full Browser PDF
 
 on:
   workflow_dispatch:
@@ -6,17 +6,17 @@ on:
       start_url:
         description: 'Starting URL to crawl'
         required: true
-        default: 'https://example.com/projects'
+        default: 'https://example.com'
       max_depth:
         description: 'Maximum crawl depth (0 = only start URL)'
         required: true
-        default: '2'
+        default: '1'
       max_pages:
-        description: 'Maximum total pages to download'
+        description: 'Maximum total pages to convert to PDF'
         required: true
-        default: '50'
+        default: '30'
       link_pattern:
-        description: 'Regex pattern for links to follow (e.g., /project/.*)'
+        description: 'Regex pattern for links to follow (e.g., /docs/.*)'
         required: false
         default: ''
       same_domain_only:
@@ -25,10 +25,10 @@ on:
         default: 'true'
 
 jobs:
-  crawl:
+  crawl-pdf:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # To commit downloaded files
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -39,11 +39,15 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install Python packages
         run: |
-          pip install requests beautifulsoup4 urllib3
+          pip install requests beautifulsoup4 playwright
 
-      - name: Run crawler
+      - name: Install Playwright with full browser and system dependencies
+        run: |
+          npx playwright install --with-deps chromium
+
+      - name: Run crawler and generate PDFs (real browser rendering)
         env:
           START_URL: ${{ github.event.inputs.start_url }}
           MAX_DEPTH: ${{ github.event.inputs.max_depth }}
@@ -51,136 +55,136 @@ jobs:
           LINK_PATTERN: ${{ github.event.inputs.link_pattern }}
           SAME_DOMAIN_ONLY: ${{ github.event.inputs.same_domain_only }}
         run: |
-          python - << 'EOF'
+          python -u << 'EOF'
           import os, re, time, hashlib
           import requests
           from urllib.parse import urljoin, urlparse
           from bs4 import BeautifulSoup
           from collections import deque
+          from playwright.sync_api import sync_playwright
 
           start_url = os.environ['START_URL']
           max_depth = int(os.environ['MAX_DEPTH'])
           max_pages = int(os.environ['MAX_PAGES'])
           link_pattern = os.environ.get('LINK_PATTERN', '')
           same_domain_only = os.environ.get('SAME_DOMAIN_ONLY', 'true').lower() == 'true'
-          
-          # Create download directory
-          download_dir = "downloaded_pages"
-          os.makedirs(download_dir, exist_ok=True)
-          
+
+          PDF_DIR = "downloaded_pdfs"
+          os.makedirs(PDF_DIR, exist_ok=True)
+
           visited = set()
-          queue = deque([(start_url, 0)])  # (url, depth)
+          queue = deque([(start_url, 0)])
           downloaded = 0
-          
-          # Get domain of start URL for filtering
           start_domain = urlparse(start_url).netloc
-          
-          headers = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-          }
-          
-          def get_filename(url):
-              # Create safe filename from URL
+
+          def safe_filename(url):
               parsed = urlparse(url)
               path = parsed.path if parsed.path else "index"
               if path.endswith('/'):
                   path += "index"
               name = f"{parsed.netloc}{path}".replace('/', '_').replace('?', '_').replace('=', '_')
-              # Limit length
               if len(name) > 200:
                   name = hashlib.md5(url.encode()).hexdigest()
-              return f"{download_dir}/{name}.html"
-          
+              return f"{PDF_DIR}/{name}.pdf"
+
           def should_follow(link):
               if not link:
                   return False
               if same_domain_only:
-                  link_domain = urlparse(link).netloc
-                  if link_domain != start_domain:
+                  if urlparse(link).netloc != start_domain:
                       return False
               if link_pattern:
                   if not re.search(link_pattern, link):
                       return False
               return True
-          
+
           def extract_links(html, base_url):
               soup = BeautifulSoup(html, 'html.parser')
               links = []
               for a in soup.find_all('a', href=True):
                   href = a['href']
-                  absolute_url = urljoin(base_url, href)
-                  parsed = urlparse(absolute_url)
-                  # Skip common non-page files
-                  skip_extensions = ('.jpg', '.jpeg', '.png', '.gif', '.pdf', '.zip', '.mp4', '.mp3', '.css', '.js')
-                  if parsed.path.lower().endswith(skip_extensions):
+                  abs_url = urljoin(base_url, href)
+                  skip_ext = ('.jpg','.jpeg','.png','.gif','.pdf','.zip','.mp4','.mp3','.css','.js','.ico','.svg')
+                  if urlparse(abs_url).path.lower().endswith(skip_ext):
                       continue
-                  # Remove fragments and query strings for dedup
-                  clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-                  links.append(clean_url)
-              return links
-          
-          print(f"Starting crawl: {start_url}")
+                  clean = f"{urlparse(abs_url).scheme}://{urlparse(abs_url).netloc}{urlparse(abs_url).path}"
+                  links.append(clean)
+              return list(set(links))
+
+          print(f"Starting full browser crawl: {start_url}")
           print(f"Max depth: {max_depth}, Max pages: {max_pages}")
-          
-          while queue and downloaded < max_pages:
-              url, depth = queue.popleft()
+
+          with sync_playwright() as p:
+              # Launch real Chromium (headless but fully capable)
+              browser = p.chromium.launch(headless=True)
               
-              if url in visited:
-                  continue
-              if depth > max_depth:
-                  continue
-              
-              print(f"[{downloaded+1}/{max_pages}] Depth {depth}: {url}")
-              
-              try:
-                  resp = requests.get(url, headers=headers, timeout=30)
-                  resp.raise_for_status()
-                  content = resp.text
-                  
-                  # Save HTML file
-                  filename = get_filename(url)
-                  with open(filename, 'w', encoding='utf-8') as f:
-                      f.write(content)
-                  downloaded += 1
-                  visited.add(url)
-                  
-                  # Extract and queue links if not at max depth
+              while queue and downloaded < max_pages:
+                  url, depth = queue.popleft()
+                  if url in visited or depth > max_depth:
+                      continue
+
+                  print(f"[{downloaded+1}/{max_pages}] Depth {depth}: {url}")
+
+                  # Fetch HTML quickly to extract links
+                  try:
+                      resp = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
+                      resp.raise_for_status()
+                      html = resp.text
+                  except Exception as e:
+                      print(f"  Failed to fetch HTML: {e}")
+                      continue
+
                   if depth < max_depth:
-                      new_links = extract_links(content, url)
+                      new_links = extract_links(html, url)
                       for link in new_links:
                           if link not in visited and should_follow(link):
-                              queue.append((link, depth + 1))
-                      
-              except Exception as e:
-                  print(f"  Failed: {e}")
-                  continue
-              
-              # Polite delay
-              time.sleep(1)
-          
-          # Create summary file
-          summary = f"""# Crawl Summary
+                              queue.append((link, depth+1))
+
+                  # Render with real browser and save PDF
+                  pdf_path = safe_filename(url)
+                  page = browser.new_page()
+                  try:
+                      print(f"  Rendering with Chromium (full browser engine)...")
+                      page.goto(url, wait_until='networkidle', timeout=45000)
+                      page.wait_for_timeout(2000)  # let lazy images load
+                      page.pdf(path=pdf_path, format='A4', print_background=True)
+                      print(f"  ✅ PDF saved: {os.path.basename(pdf_path)}")
+                      downloaded += 1
+                  except Exception as e:
+                      print(f"  ❌ PDF error: {e}")
+                  finally:
+                      page.close()
+
+                  visited.add(url)
+                  time.sleep(1)
+
+              browser.close()
+
+          # Summary
+          summary = f"""# Crawl Summary – Full Browser PDF
+
           - Start URL: {start_url}
           - Max depth: {max_depth}
-          - Pages downloaded: {downloaded}
-          - Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}
-          
-          ## Downloaded files
+          - Pages converted: {downloaded}
+          - Date: {time.strftime('%Y-%m-%d %H:%M:%S')}
+
+          ## PDF files
           """
-          for f in sorted(os.listdir(download_dir)):
-              if f.endswith('.html'):
-                  summary += f"- {f}\n"
-          
+          for f in sorted(os.listdir(PDF_DIR)):
+              if f.endswith('.pdf'):
+                  size = os.path.getsize(f"{PDF_DIR}/{f}") / 1024
+                  summary += f"- {f} ({size:.1f} KB)\n"
+
           with open("crawl_summary.md", "w") as sf:
               sf.write(summary)
-          
-          print(f"\n✅ Crawl completed. Downloaded {downloaded} pages.")
+
+          print(f"\n✅ Done. Saved {downloaded} PDFs to '{PDF_DIR}'")
           EOF
 
-      - name: Commit and push downloaded pages
+      - name: Commit and push PDFs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add downloaded_pages/ crawl_summary.md
-          git diff --cached --quiet || git commit -m "Add crawled pages from ${{ github.event.inputs.start_url }}"
+          git add downloaded_pdfs/ crawl_summary.md
+          git diff --cached --quiet || git commit -m "Full browser PDF crawl of ${{ github.event.inputs.start_url }}"
           git push
