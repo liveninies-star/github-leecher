@@ -1,11 +1,12 @@
 # Crawl Summary – Full Browser PDF
 
-- Start URL: https://youtube.com
-- Max depth: 1
-- Pages converted: 6
-- Date: 2026-05-10 14:20:22
+- Start URL: https://greatfire.org/
+- Max depth: 0
+- Pages converted: 1
+- Date: 2026-05-11 07:07:29
 
 ## PDF files
+- greatfire.org_index.pdf (902.0 KB)
 - t.me_Filtereshekan.pdf (112.5 KB)
 - t.me_moladz_by_official.pdf (43.5 KB)
 - t.me_s_Filtereshekan.pdf (331.7 KB)
