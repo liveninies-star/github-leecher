@@ -1,4 +1,4 @@
-name: Crawl & Leech - Full Browser PDF
+name: readpages
 
 on:
   workflow_dispatch:
@@ -23,6 +23,14 @@ on:
         description: 'Only follow links on same domain? (true/false)'
         required: false
         default: 'true'
+      telegram_scroll:
+        description: 'For Telegram: scroll to load all messages? (true/false)'
+        required: false
+        default: 'false'
+      scroll_attempts:
+        description: 'For Telegram: max scroll attempts to load content'
+        required: false
+        default: '20'
 
 jobs:
   crawl-pdf:
@@ -47,13 +55,15 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
 
-      - name: Run crawler and generate PDFs (real browser rendering)
+      - name: Run crawler and generate PDFs (with site-specific fixes)
         env:
           START_URL: ${{ github.event.inputs.start_url }}
           MAX_DEPTH: ${{ github.event.inputs.max_depth }}
           MAX_PAGES: ${{ github.event.inputs.max_pages }}
           LINK_PATTERN: ${{ github.event.inputs.link_pattern }}
           SAME_DOMAIN_ONLY: ${{ github.event.inputs.same_domain_only }}
+          TELEGRAM_SCROLL: ${{ github.event.inputs.telegram_scroll }}
+          SCROLL_ATTEMPTS: ${{ github.event.inputs.scroll_attempts }}
         run: |
           python -u << 'EOF'
           import os, re, time, hashlib
@@ -68,6 +78,8 @@ jobs:
           max_pages = int(os.environ['MAX_PAGES'])
           link_pattern = os.environ.get('LINK_PATTERN', '')
           same_domain_only = os.environ.get('SAME_DOMAIN_ONLY', 'true').lower() == 'true'
+          telegram_scroll = os.environ.get('TELEGRAM_SCROLL', 'false').lower() == 'true'
+          scroll_attempts = int(os.environ.get('SCROLL_ATTEMPTS', '20'))
 
           PDF_DIR = "downloaded_pdfs"
           os.makedirs(PDF_DIR, exist_ok=True)
@@ -76,6 +88,8 @@ jobs:
           queue = deque([(start_url, 0)])
           downloaded = 0
           start_domain = urlparse(start_url).netloc
+          is_telegram = 'telegram' in start_domain
+          is_modrinth = 'modrinth' in start_domain
 
           def safe_filename(url):
               parsed = urlparse(url)
@@ -111,12 +125,76 @@ jobs:
                   links.append(clean)
               return list(set(links))
 
+          def scroll_to_load_all(page, max_attempts=scroll_attempts):
+              """Scroll repeatedly to trigger infinite scroll (for Telegram)"""
+              last_height = page.evaluate("document.body.scrollHeight")
+              for attempt in range(max_attempts):
+                  page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                  time.sleep(2)
+                  new_height = page.evaluate("document.body.scrollHeight")
+                  if new_height == last_height:
+                      print(f"    No new content after {attempt+1} scrolls")
+                      break
+                  last_height = new_height
+                  print(f"    Scrolled attempt {attempt+1}, new height: {new_height}")
+              # Scroll back to top for PDF capture
+              page.evaluate("window.scrollTo(0, 0)")
+              time.sleep(1)
+
+          def render_to_pdf(page, url, pdf_path):
+              """Render URL with site-specific settings"""
+              try:
+                  # Choose wait strategy based on site
+                  if is_modrinth:
+                      # Modrinth fix: use domcontentloaded + selector wait
+                      print(f"    Using Modrinth-compatible loading...")
+                      page.goto(url, wait_until='domcontentloaded', timeout=60000)
+                      # Wait for actual content to appear
+                      try:
+                          page.wait_for_selector('main, .project-content, [data-testid]', timeout=30000)
+                          print(f"    Content selector found")
+                      except Exception as sel_err:
+                          print(f"    No specific selector found, continuing anyway")
+                      # Extra time for React hydration
+                      time.sleep(5)
+                  elif is_telegram and telegram_scroll:
+                      # Telegram fix: scroll after load
+                      page.goto(url, wait_until='networkidle', timeout=60000)
+                      time.sleep(3)
+                      print(f"    Scrolling to load all Telegram messages...")
+                      scroll_to_load_all(page)
+                  else:
+                      # Normal sites
+                      page.goto(url, wait_until='networkidle', timeout=60000)
+                      time.sleep(3)
+                  
+                  # Generate PDF
+                  page.pdf(path=pdf_path, format='A4', print_background=True)
+                  return True
+                  
+              except Exception as e:
+                  print(f"    PDF generation error: {e}")
+                  return False
+
           print(f"Starting full browser crawl: {start_url}")
+          print(f"Site detection: Telegram={is_telegram}, Modrinth={is_modrinth}")
           print(f"Max depth: {max_depth}, Max pages: {max_pages}")
 
           with sync_playwright() as p:
-              # Launch real Chromium (headless but fully capable)
-              browser = p.chromium.launch(headless=True)
+              # Launch with stealth args to avoid detection
+              browser = p.chromium.launch(
+                  headless=True,
+                  args=[
+                      '--disable-blink-features=AutomationControlled',
+                      '--no-sandbox',
+                      '--disable-dev-shm-usage'
+                  ]
+              )
+              context = browser.new_context(
+                  user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  viewport={'width': 1280, 'height': 720}
+              )
+              page = context.new_page()
               
               while queue and downloaded < max_pages:
                   url, depth = queue.popleft()
@@ -140,32 +218,35 @@ jobs:
                           if link not in visited and should_follow(link):
                               queue.append((link, depth+1))
 
-                  # Render with real browser and save PDF
+                  # Render and save PDF
                   pdf_path = safe_filename(url)
-                  page = browser.new_page()
-                  try:
-                      print(f"  Rendering with Chromium (full browser engine)...")
-                      page.goto(url, wait_until='networkidle', timeout=45000)
-                      page.wait_for_timeout(2000)  # let lazy images load
-                      page.pdf(path=pdf_path, format='A4', print_background=True)
-                      print(f"  ✅ PDF saved: {os.path.basename(pdf_path)}")
+                  print(f"  Rendering with Chromium...")
+                  
+                  # Navigate to URL (new page per URL to avoid state issues)
+                  new_page = context.new_page()
+                  success = render_to_pdf(new_page, url, pdf_path)
+                  new_page.close()
+                  
+                  if success:
+                      size_kb = os.path.getsize(pdf_path) / 1024
+                      print(f"  ✅ PDF saved: {os.path.basename(pdf_path)} ({size_kb:.1f} KB)")
                       downloaded += 1
-                  except Exception as e:
-                      print(f"  ❌ PDF error: {e}")
-                  finally:
-                      page.close()
+                  else:
+                      print(f"  ❌ Failed to generate PDF for {url}")
 
                   visited.add(url)
                   time.sleep(1)
 
+              context.close()
               browser.close()
 
-          # Summary
-          summary = f"""# Crawl Summary – Full Browser PDF
+          # Create summary
+          summary = f"""# Crawl Summary – Full Browser PDF (Fixed)
 
           - Start URL: {start_url}
           - Max depth: {max_depth}
           - Pages converted: {downloaded}
+          - Telegram scroll mode: {telegram_scroll}
           - Date: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
           ## PDF files
