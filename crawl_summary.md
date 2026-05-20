@@ -1,9 +1,10 @@
-# Crawl Summary – Full Browser PDF
+# Crawl Summary – Full Browser PDF (Fixed)
 
-- Start URL: https://t.me/kingproxiy
+- Start URL: https://www.apkmirror.com/apk/google-inc/chrome/google-chrome-138-0-7204-63-release/
 - Max depth: 0
 - Pages converted: 1
-- Date: 2026-05-11 07:36:14
+- Telegram scroll mode: False
+- Date: 2026-05-20 12:50:17
 
 ## PDF files
 - greatfire.org_index.pdf (902.0 KB)
@@ -13,6 +14,7 @@
 - t.me_moladz_by_official.pdf (43.5 KB)
 - t.me_s_Filtereshekan.pdf (331.7 KB)
 - t.me_s_iroproxy.pdf (158.7 KB)
+- www.apkmirror.com_apk_google-inc_chrome_google-chrome-138-0-7204-63-release_index.pdf (696.1 KB)
 - youtube.com_index.pdf (74.0 KB)
 - youtube.com_new.pdf (507.6 KB)
 - youtube.com_t_contact_us_index.pdf (82.9 KB)
