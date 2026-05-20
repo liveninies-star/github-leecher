@@ -1,1 +1,174 @@
-name: "Auto-Release Videos from Folder"  on:   workflow_dispatch:  # 👈 Manual trigger button     inputs:       force_new_release:         description: 'Create new release instead of updating latest?'         required: false         default: 'false'         type: choice         options:           - 'false'           - 'true'   push:     paths:       - 'downloads/Unknown_videos/**'  # Triggers when any file is added/changed in this folder     branches:       - main  # or master, depending on your default branch  jobs:   create-or-update-release:     runs-on: ubuntu-latest     permissions:       contents: write  # Required for creating releases and uploading assets          steps:       - name: Checkout repository         uses: actions/checkout@v4                - name: Get file list with creation dates         id: get_files         run: |           # Check if folder exists           if [ ! -d "downloaded_pdfs/" ]; then             echo "Folder downloads/Unknown_videos/ does not exist yet"             echo "file_list=" >> $GITHUB_OUTPUT             exit 0           fi                      # Change to the target directory           cd downloaded_pdfs/                      # Check if folder is empty           if [ -z "$(ls -A)" ]; then             echo "No files found in downloads/Unknown_videos/"             echo "file_list=" >> $GITHUB_OUTPUT             exit 0           fi                      # Get list of all files with their creation dates           files=""           for file in *; do             if [ -f "$file" ]; then               # Get the date when file was first added to the repo (creation date)               creation_date=$(git log --format="%ad" --date=format:'%Y-%m-%d %H:%M:%S' --diff-filter=A -- "$file" | tail -1)                              # If file was never committed (just added), use current date               if [ -z "$creation_date" ]; then                 creation_date=$(date '+%Y-%m-%d %H:%M:%S')               fi                              # Store filename and date (using | as delimiter)               files="${files}${file}|${creation_date}\n"             fi           done                      # Save to output (handle multiline properly)           echo "files_content<<EOF" >> $GITHUB_OUTPUT           echo -e "$files" >> $GITHUB_OUTPUT           echo "EOF" >> $GITHUB_OUTPUT                  - name: Generate Release Notes with File Dates         id: release_notes         run: |           echo "### 📹 Available Videos" > release_notes.md           echo "" >> release_notes.md                      if [ -z "${{ steps.get_files.outputs.files_content }}" ]; then             echo "⚠️ No videos found in \`downloads/Unknown_videos/\` folder." >> release_notes.md             echo "" >> release_notes.md             echo "Add video files to this folder and push to trigger a release." >> release_notes.md           else             echo "| File Name | Date Added |" >> release_notes.md             echo "|-----------|------------|" >> release_notes.md             # Parse the file list and create markdown table             echo "${{ steps.get_files.outputs.files_content }}" | while IFS='|' read -r filename creation_date; do               if [ -n "$filename" ]; then                 echo "| $filename | $creation_date |" >> release_notes.md               fi             done           fi                      echo "" >> release_notes.md           echo "⬇️ **Download individual files below**" >> release_notes.md                      cat release_notes.md                  - name: Determine Release Tag         id: release_tag         run: |           if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.force_new_release }}" == "true" ]; then             # Manual run with "create new" selected             echo "tag_name=videos-release-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT             echo "release_name=Video Files Release - $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT           else             # Auto push OR manual with "update existing"             echo "tag_name=videos-release-latest" >> $GITHUB_OUTPUT             echo "release_name=Latest Video Files Release" >> $GITHUB_OUTPUT           fi                  - name: Create or Update Release         id: create_release         uses: softprops/action-gh-release@v1         with:           tag_name: ${{ steps.release_tag.outputs.tag_name }}           name: ${{ steps.release_tag.outputs.release_name }}           body_path: release_notes.md           files: |             downloads/Unknown_videos/*           fail_on_unmatched_files: false  # Won't fail if folder is empty           make_latest: true         env:           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+name: "Auto-Release Videos from Folder"
+
+on:
+  workflow_dispatch:  # 👈 Manual trigger button
+    inputs:
+      force_new_release:
+        description: 'Create new release instead of updating latest?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+  push:
+    paths:
+      - 'downloads/Unknown_videos/**'  # Triggers when any file is added/changed in this folder
+      - 'downloaded_pdfs/**'  # Also triggers for this folder
+    branches:
+      - main  # or master, depending on your default branch
+
+jobs:
+  create-or-update-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required for creating releases and uploading assets
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for git log to get creation dates
+      
+      - name: Get file list with creation dates
+        id: get_files
+        run: |
+          # Initialize variables
+          files=""
+          folders_found=""
+          
+          # Process first folder: downloads/Unknown_videos/
+          if [ -d "downloads/Unknown_videos/" ]; then
+            cd downloads/Unknown_videos/
+            if [ -n "$(ls -A)" ]; then
+              echo "📁 Found files in downloads/Unknown_videos/"
+              folders_found="${folders_found}📁 downloads/Unknown_videos/\n"
+              for file in *; do
+                if [ -f "$file" ]; then
+                  # Get the date when file was first added to the repo (creation date)
+                  creation_date=$(git log --format="%ad" --date=format:'%Y-%m-%d %H:%M:%S' --diff-filter=A -- "$file" | tail -1)
+                  
+                  # If file was never committed (just added), use current date
+                  if [ -z "$creation_date" ]; then
+                    creation_date=$(date '+%Y-%m-%d %H:%M:%S')
+                  fi
+                  
+                  # Store filename and date (using | as delimiter) with folder prefix
+                  files="${files}downloads/Unknown_videos/${file}|${creation_date}\n"
+                fi
+              done
+            else
+              echo "Folder downloads/Unknown_videos/ is empty"
+            fi
+            cd ../../
+          else
+            echo "Folder downloads/Unknown_videos/ does not exist"
+          fi
+          
+          # Process second folder: downloaded_pdfs/
+          if [ -d "downloaded_pdfs/" ]; then
+            cd downloaded_pdfs/
+            if [ -n "$(ls -A)" ]; then
+              echo "📁 Found files in downloaded_pdfs/"
+              folders_found="${folders_found}📁 downloaded_pdfs/\n"
+              for file in *; do
+                if [ -f "$file" ]; then
+                  # Get the date when file was first added to the repo (creation date)
+                  creation_date=$(git log --format="%ad" --date=format:'%Y-%m-%d %H:%M:%S' --diff-filter=A -- "$file" | tail -1)
+                  
+                  # If file was never committed (just added), use current date
+                  if [ -z "$creation_date" ]; then
+                    creation_date=$(date '+%Y-%m-%d %H:%M:%S')
+                  fi
+                  
+                  # Store filename and date (using | as delimiter) with folder prefix
+                  files="${files}downloaded_pdfs/${file}|${creation_date}\n"
+                fi
+              done
+            else
+              echo "Folder downloaded_pdfs/ is empty"
+            fi
+            cd ../
+          else
+            echo "Folder downloaded_pdfs/ does not exist"
+          fi
+          
+          # If no files found in either folder
+          if [ -z "$files" ]; then
+            echo "No files found in any monitored folders"
+          fi
+          
+          # Save to output (handle multiline properly)
+          echo "files_content<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$files" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "folders_found<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$folders_found" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Generate Release Notes with File Dates
+        id: release_notes
+        run: |
+          echo "### 📹 Available Files" > release_notes.md
+          echo "" >> release_notes.md
+          
+          if [ -z "${{ steps.get_files.outputs.files_content }}" ]; then
+            echo "⚠️ No files found in monitored folders:" >> release_notes.md
+            echo "- \`downloads/Unknown_videos/\`" >> release_notes.md
+            echo "- \`downloaded_pdfs/\`" >> release_notes.md
+            echo "" >> release_notes.md
+            echo "Add files to these folders and push to trigger a release." >> release_notes.md
+          else
+            # Show which folders were found
+            if [ -n "${{ steps.get_files.outputs.folders_found }}" ]; then
+              echo "Files from:" >> release_notes.md
+              echo -e "${{ steps.get_files.outputs.folders_found }}" >> release_notes.md
+              echo "" >> release_notes.md
+            fi
+            
+            echo "| File Name | Date Added |" >> release_notes.md
+            echo "|-----------|------------|" >> release_notes.md
+            # Parse the file list and create markdown table
+            echo "${{ steps.get_files.outputs.files_content }}" | while IFS='|' read -r fullpath creation_date; do
+              if [ -n "$fullpath" ]; then
+                # Extract just the filename for display
+                filename=$(basename "$fullpath")
+                folder=$(dirname "$fullpath")
+                echo "| \`$folder/\`**$filename** | $creation_date |" >> release_notes.md
+              fi
+            done
+          fi
+          
+          echo "" >> release_notes.md
+          echo "⬇️ **Download individual files below**" >> release_notes.md
+          
+          cat release_notes.md
+
+      - name: Determine Release Tag
+        id: release_tag
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ "${{ github.event.inputs.force_new_release }}" == "true" ]; then
+            # Manual run with "create new" selected
+            echo "tag_name=videos-release-$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+            echo "release_name=Video Files Release - $(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_OUTPUT
+          else
+            # Auto push OR manual with "update existing"
+            echo "tag_name=videos-release-latest" >> $GITHUB_OUTPUT
+            echo "release_name=Latest Video Files Release" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create or Update Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.release_tag.outputs.tag_name }}
+          name: ${{ steps.release_tag.outputs.release_name }}
+          body_path: release_notes.md
+          files: |
+            downloads/Unknown_videos/*
+            downloaded_pdfs/*
+          fail_on_unmatched_files: false  # Won't fail if folder is empty
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
