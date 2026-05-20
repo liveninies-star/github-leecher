@@ -1,10 +1,10 @@
 # Crawl Summary – Full Browser PDF (Fixed)
 
-- Start URL: https://www.apkmirror.com/apk/google-inc/chrome/google-chrome-138-0-7204-63-release/
+- Start URL: https://www.apkmirror.com/apk/google-inc/chrome/google-chrome-138-0-7204-63-release/google-chrome-138-0-7204-63-12-android-apk-download/
 - Max depth: 0
-- Pages converted: 1
+- Pages converted: 0
 - Telegram scroll mode: False
-- Date: 2026-05-20 12:50:17
+- Date: 2026-05-20 13:20:37
 
 ## PDF files
 - greatfire.org_index.pdf (902.0 KB)
