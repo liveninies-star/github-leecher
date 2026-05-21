@@ -192,17 +192,12 @@ jobs:
             FILENAME=$(basename "$file")
 
             if [ "${#PASSWORD}" -gt 0 ]; then
-              7z a -p"$PASSWORD" -mhe=on -mx=3 -v${SPLIT_MB}m "${FOLDER}/${FILENAME}.7z" "$file"
+              7z a -p"$PASSWORD" -mhe=on -mx=3 "${FOLDER}/${FILENAME}.7z" "$file"
             else
-              7z a -mx=3 -v${SPLIT_MB}m "${FOLDER}/${FILENAME}.7z" "$file"
+              7z a -mx=3 "${FOLDER}/${FILENAME}.7z" "$file"
             fi
 
-            if [ -f "${FOLDER}/${FILENAME}.7z.001" ] && [ ! -f "${FOLDER}/${FILENAME}.7z.002" ]; then
-              mv "${FOLDER}/${FILENAME}.7z.001" "${FOLDER}/${FILENAME}.7z"
-              echo "Single chunk"
-            else
-              echo "Multiple chunks"
-            fi
+            echo "Single archive created"
           done
 
           rm -rf files
