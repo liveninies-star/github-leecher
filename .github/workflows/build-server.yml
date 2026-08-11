@@ -1,0 +1,672 @@
+name: Build Minecraft Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Server / release name"
+        required: true
+        type: string
+      version:
+        description: "Minecraft version"
+        required: true
+        type: string
+      world_url:
+        description: "Direct download URL for the world ZIP"
+        required: true
+        type: string
+      resource_pack_url:
+        description: "Optional direct download URL for a resource-pack ZIP. If empty, search the world ZIP."
+        required: false
+        type: string
+      description:
+        description: "Description shown at the top of the GitHub Release"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout builder repository
+        uses: actions/checkout@v6
+
+      - name: Select exact Mojang server JAR and Java version
+        env:
+          MC_VERSION: ${{ inputs.version }}
+          VERSION_TABLE: |
+            26.2|25|https://piston-data.mojang.com/v1/objects/823e2250d24b3ddac457a60c92a6a941943fcd6a/server.jar
+            26.1.2|25|https://piston-data.mojang.com/v1/objects/97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51/server.jar
+            26.1.1|25|https://piston-data.mojang.com/v1/objects/49c8195703ad0ba4f0a4efbccfd85a4a8ca57431/server.jar
+            26.1|25|https://piston-data.mojang.com/v1/objects/3872a7f07a1a595e651aef8b058dfc2bb3772f46/server.jar
+            1.21.11|21|https://piston-data.mojang.com/v1/objects/64bb6d763bed0a9f1d632ec347938594144943ed/server.jar
+            1.21.10|21|https://piston-data.mojang.com/v1/objects/95495a7f485eedd84ce928cef5e223b757d2f764/server.jar
+            1.21.9|21|https://piston-data.mojang.com/v1/objects/11e54c2081420a4d49db3007e66c80a22579ff2a/server.jar
+            1.21.8|21|https://piston-data.mojang.com/v1/objects/6bce4ef400e4efaa63a13d5e6f6b500be969ef81/server.jar
+            1.21.7|21|https://piston-data.mojang.com/v1/objects/05e4b48fbc01f0385adb74bcff9751d34552486c/server.jar
+            1.21.6|21|https://piston-data.mojang.com/v1/objects/6e64dcabba3c01a7271b4fa6bd898483b794c59b/server.jar
+            1.21.5|21|https://piston-data.mojang.com/v1/objects/e6ec2f64e6080b9b5d9b471b291c33cc7f509733/server.jar
+            1.21.4|21|https://piston-data.mojang.com/v1/objects/4707d00eb834b446575d89a61a11b5d548d8c001/server.jar
+            1.21.3|21|https://piston-data.mojang.com/v1/objects/45810d238246d90e811d896f87b14695b7fb6839/server.jar
+            1.21.2|21|https://piston-data.mojang.com/v1/objects/7bf95409b0d9b5388bfea3704ec92012d273c14c/server.jar
+            1.21.1|21|https://piston-data.mojang.com/v1/objects/59353fb40c36d304f2035d51e7d6e6baa98dc05c/server.jar
+            1.21|21|https://piston-data.mojang.com/v1/objects/450698d1863ab5180c25d7c804ef0fe6369dd1ba/server.jar
+            1.20.6|21|https://piston-data.mojang.com/v1/objects/145ff0858209bcfc164859ba735d4199aafa1eea/server.jar
+            1.20.5|21|https://piston-data.mojang.com/v1/objects/79493072f65e17243fd36a699c9a96b4381feb91/server.jar
+            1.20.4|17|https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar
+            1.20.3|17|https://piston-data.mojang.com/v1/objects/4fb536bfd4a83d61cdbaf684b8d311e66e7d4c49/server.jar
+            1.20.2|17|https://piston-data.mojang.com/v1/objects/5b868151bd02b41319f54c8d4061b8cae84e665c/server.jar
+            1.20.1|17|https://piston-data.mojang.com/v1/objects/84194a2f286ef7c14ed7ce0090dba59902951553/server.jar
+            1.20|17|https://piston-data.mojang.com/v1/objects/15c777e2cfe0556eef19aab534b186c0c6f277e1/server.jar
+            1.19.4|17|https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar
+            1.19.3|17|https://piston-data.mojang.com/v1/objects/c9df48efed58511cdd0213c56b9013a7b5c9ac1f/server.jar
+            1.19.2|17|https://piston-data.mojang.com/v1/objects/f69c284232d7c7580bd89a5a4931c3581eae1378/server.jar
+            1.19.1|17|https://piston-data.mojang.com/v1/objects/8399e1211e95faa421c1507b322dbeae86d604df/server.jar
+            1.19|17|https://piston-data.mojang.com/v1/objects/e00c4052dac1d59a1188b2aa9d5a87113aaf1122/server.jar
+            1.18.2|17|https://piston-data.mojang.com/v1/objects/c8f83c5655308435b3dcf03c06d9fe8740a77469/server.jar
+            1.18.1|17|https://piston-data.mojang.com/v1/objects/125e5adf40c659fd3bce3e66e67a16bb49ecc1b9/server.jar
+            1.18|17|https://piston-data.mojang.com/v1/objects/3cf24a8694aca6267883b17d934efacc5e44440d/server.jar
+            1.17.1|16|https://piston-data.mojang.com/v1/objects/a16d67e5807f57fc4e550299cf20226194497dc2/server.jar
+            1.17|16|https://piston-data.mojang.com/v1/objects/0a269b5f2c5b93b1712d0f5dc43b6182b9ab254e/server.jar
+            1.16.5|8|https://piston-data.mojang.com/v1/objects/1b557e7b033b583cd9f66746b7a9ab1ec1673ced/server.jar
+            1.16.4|8|https://piston-data.mojang.com/v1/objects/35139deedbd5182953cf1caa23835da59ca3d7cd/server.jar
+            1.16.3|8|https://piston-data.mojang.com/v1/objects/f02f4473dbf152c23d7d484952121db0b36698cb/server.jar
+            1.16.2|8|https://piston-data.mojang.com/v1/objects/c5f6fb23c3876461d46ec380421e42b289789530/server.jar
+            1.16.1|8|https://piston-data.mojang.com/v1/objects/a412fd69db1f81db3f511c1463fd304675244077/server.jar
+            1.16|8|https://piston-data.mojang.com/v1/objects/a0d03225615ba897619220e256a266cb33a44b6b/server.jar
+            1.15.2|8|https://piston-data.mojang.com/v1/objects/bb2b6b1aefcd70dfd1892149ac3a215f6c636b07/server.jar
+            1.15.1|8|https://piston-data.mojang.com/v1/objects/4d1826eebac84847c71a77f9349cc22afd0cf0a1/server.jar
+            1.15|8|https://piston-data.mojang.com/v1/objects/e9f105b3c5c7e85c7b445249a93362a22f62442d/server.jar
+            1.14.4|8|https://piston-data.mojang.com/v1/objects/3dc3d84a581f14691199cf6831b71ed1296a9fdf/server.jar
+            1.14.3|8|https://piston-data.mojang.com/v1/objects/d0d0fe2b1dc6ab4c65554cb734270872b72dadd6/server.jar
+            1.14.2|8|https://piston-data.mojang.com/v1/objects/808be3869e2ca6b62378f9f4b33c946621620019/server.jar
+            1.14.1|8|https://piston-data.mojang.com/v1/objects/ed76d597a44c5266be2a7fcd77a8270f1f0bc118/server.jar
+            1.14|8|https://piston-data.mojang.com/v1/objects/f1a0073671057f01aa843443fef34330281333ce/server.jar
+            1.13.2|8|https://piston-data.mojang.com/v1/objects/3737db93722a9e39eeada7c27e7aca28b144ffa7/server.jar
+            1.13.1|8|https://piston-data.mojang.com/v1/objects/fe123682e9cb30031eae351764f653500b7396c9/server.jar
+            1.13|8|https://piston-data.mojang.com/v1/objects/d0caafb8438ebd206f99930cfaecfa6c9a13dca0/server.jar
+            1.12.2|8|https://piston-data.mojang.com/v1/objects/886945bfb2b978778c3a0288fd7fab09d315b25f/server.jar
+            1.12.1|8|https://piston-data.mojang.com/v1/objects/561c7b2d54bae80cc06b05d950633a9ac95da816/server.jar
+            1.12|8|https://piston-data.mojang.com/v1/objects/8494e844e911ea0d63878f64da9dcc21f53a3463/server.jar
+            1.11.2|8|https://piston-data.mojang.com/v1/objects/f00c294a1576e03fddcac777c3cf4c7d404c4ba4/server.jar
+            1.11.1|8|https://piston-data.mojang.com/v1/objects/1f97bd101e508d7b52b3d6a7879223b000b5eba0/server.jar
+            1.11|8|https://piston-data.mojang.com/v1/objects/48820c84cb1ed502cb5b2fe23b8153d5e4fa61c0/server.jar
+            1.10.2|8|https://piston-data.mojang.com/v1/objects/3d501b23df53c548254f5e3f66492d178a48db63/server.jar
+            1.10.1|8|https://piston-data.mojang.com/v1/objects/cb4c6f9f51a845b09a8861cdbe0eea3ff6996dee/server.jar
+            1.10|8|https://piston-data.mojang.com/v1/objects/a96617ffdf5dabbb718ab11a9a68e50545fc5bee/server.jar
+            1.9.4|8|https://piston-data.mojang.com/v1/objects/edbb7b1758af33d365bf835eb9d13de005b1e274/server.jar
+            1.9.3|8|https://piston-data.mojang.com/v1/objects/8e897b6b6d784f745332644f4d104f7a6e737ccf/server.jar
+            1.9.2|8|https://piston-data.mojang.com/v1/objects/2b95cc7b136017e064c46d04a5825fe4cfa1be30/server.jar
+            1.9.1|8|https://piston-data.mojang.com/v1/objects/bf95d9118d9b4b827f524c878efd275125b56181/server.jar
+            1.9|8|https://piston-data.mojang.com/v1/objects/b4d449cf2918e0f3bd8aa18954b916a4d1880f0d/server.jar
+            1.8.9|8|https://launcher.mojang.com/v1/objects/b58b2ceb36e01bcd8dbf49c8fb66c55a9f0676cd/server.jar
+            1.8.8|8|https://launcher.mojang.com/v1/objects/5fafba3f58c40dc51b5c3ca72a98f62dfdae1db7/server.jar
+            1.8.7|8|https://launcher.mojang.com/v1/objects/35c59e16d1f3b751cd20b76b9b8a19045de363a9/server.jar
+            1.8.6|8|https://launcher.mojang.com/v1/objects/2bd44b53198f143fb278f8bec3a505dad0beacd2/server.jar
+            1.8.5|8|https://launcher.mojang.com/v1/objects/ea6dd23658b167dbc0877015d1072cac21ab6eee/server.jar
+            1.8.4|8|https://launcher.mojang.com/v1/objects/dd4b5eba1c79500390e0b0f45162fa70d38f8a3d/server.jar
+            1.8.3|8|https://launcher.mojang.com/v1/objects/163ba351cb86f6390450bb2a67fafeb92b6c0f2f/server.jar
+            1.8.2|8|https://launcher.mojang.com/v1/objects/a37bdd5210137354ed1bfe3dac0a5b77fe08fe2e/server.jar
+            1.8.1|8|https://launcher.mojang.com/v1/objects/68bfb524888f7c0ab939025e07e5de08843dac0f/server.jar
+            1.8|8|https://launcher.mojang.com/v1/objects/a028f00e678ee5c6aef0e29656dca091b5df11c7/server.jar
+        shell: bash
+        run: |
+          IFS='|' read -r SELECTED_VERSION JAVA_VERSION SERVER_JAR_URL < <(
+            printf '%s\n' "$VERSION_TABLE" | awk -F'|' -v v="$MC_VERSION" '$1 == v { print; exit }'
+          )
+          if [ -z "${SELECTED_VERSION:-}" ]; then
+            echo "::error::Unsupported Minecraft version: $MC_VERSION"
+            exit 1
+          fi
+          echo "JAVA_VERSION=$JAVA_VERSION" >> "$GITHUB_ENV"
+          echo "SERVER_JAR_URL=$SERVER_JAR_URL" >> "$GITHUB_ENV"
+
+      - name: Set up required Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          java-package: jdk
+          check-latest: false
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y unzip zip python3
+          rm -rf build
+          mkdir -p build/downloads build/world-extracted build/resource-pack-work build/server
+
+      - name: Download Minecraft server JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 5 --retry-delay 2 \
+            --output build/server/server.jar "$SERVER_JAR_URL"
+          test -s build/server/server.jar
+
+      - name: Download world ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 5 --retry-delay 2 \
+            --output build/downloads/world.zip "${{ inputs.world_url }}"
+          test -s build/downloads/world.zip
+          unzip -tq build/downloads/world.zip >/dev/null
+
+      - name: Locate and install actual world directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q build/downloads/world.zip -d build/world-extracted
+          mapfile -t LEVEL_FILES < <(find build/world-extracted -type f -name level.dat -print)
+          if [ "${#LEVEL_FILES[@]}" -eq 0 ]; then
+            echo "::error::No level.dat found in the world ZIP."
+            exit 1
+          fi
+          if [ "${#LEVEL_FILES[@]}" -ne 1 ]; then
+            echo "::error::More than one level.dat was found; refusing to guess the world."
+            printf '%s\n' "${LEVEL_FILES[@]}"
+            exit 1
+          fi
+          WORLD_DIR="$(dirname "${LEVEL_FILES[0]}")"
+          mkdir -p build/server/world
+          cp -a "$WORLD_DIR/." build/server/world/
+          test -f build/server/world/level.dat
+
+      - name: Resolve resource pack
+        env:
+          EXPLICIT_RESOURCE_PACK_URL: ${{ inputs.resource_pack_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          normalize_pack_dir() {
+            local candidate_root="$1"
+            local output_zip="$2"
+            mapfile -t META < <(find "$candidate_root" -type f -name pack.mcmeta -print)
+            if [ "${#META[@]}" -ne 1 ]; then
+              echo "::error::Resource-pack candidate must contain exactly one pack.mcmeta; found ${#META[@]}."
+              return 1
+            fi
+            local pack_root
+            pack_root="$(dirname "${META[0]}")"
+            ( cd "$pack_root" && zip -qr -6 "$GITHUB_WORKSPACE/$output_zip" . )
+          }
+
+          normalize_pack_zip() {
+            local archive="$1"
+            local work="$2"
+            local output_zip="$3"
+            rm -rf "$work"
+            mkdir -p "$work"
+            unzip -q "$archive" -d "$work"
+            normalize_pack_dir "$work" "$output_zip"
+          }
+
+          if [ -n "$EXPLICIT_RESOURCE_PACK_URL" ]; then
+            echo "Explicit resource-pack URL supplied; ignore resource packs inside the world ZIP."
+            curl --fail --location --retry 5 --retry-delay 2 \
+              --output build/downloads/resource-pack-source.zip "$EXPLICIT_RESOURCE_PACK_URL"
+            unzip -tq build/downloads/resource-pack-source.zip >/dev/null
+            normalize_pack_zip \
+              build/downloads/resource-pack-source.zip \
+              build/resource-pack-work/explicit \
+              build/server/resource-pack.zip
+            echo "HAS_RESOURCE_PACK=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          mapfile -t DIR_CANDIDATES < <(find build/world-extracted -type f -name pack.mcmeta -print)
+          mapfile -t ZIP_CANDIDATES < <(
+            while IFS= read -r candidate; do
+              if unzip -Z1 "$candidate" 2>/dev/null | grep -Eq '(^|/)pack\.mcmeta$'; then
+                printf '%s\n' "$candidate"
+              fi
+            done < <(find build/world-extracted -type f -iname '*.zip' -print)
+          )
+
+          count=$(( ${#DIR_CANDIDATES[@]} + ${#ZIP_CANDIDATES[@]} ))
+          if [ "$count" -eq 0 ]; then
+            echo "No resource pack found."
+            echo "HAS_RESOURCE_PACK=false" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Multiple resource-pack candidates found. Supply resource_pack_url explicitly to choose one."
+            printf 'Directory candidates:\n%s\n' "${DIR_CANDIDATES[*]-}"
+            printf 'ZIP candidates:\n%s\n' "${ZIP_CANDIDATES[*]-}"
+            exit 1
+          fi
+
+          if [ "${#DIR_CANDIDATES[@]}" -eq 1 ]; then
+            normalize_pack_dir \
+              "$(dirname "${DIR_CANDIDATES[0]}")" \
+              build/server/resource-pack.zip
+          else
+            normalize_pack_zip \
+              "${ZIP_CANDIDATES[0]}" \
+              build/resource-pack-work/from-world \
+              build/server/resource-pack.zip
+          fi
+
+          echo "HAS_RESOURCE_PACK=true" >> "$GITHUB_ENV"
+
+      - name: First Minecraft run to generate eula.txt and server.properties
+        working-directory: build/server
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          timeout 180s java -Xms1G -Xmx4G -jar server.jar nogui >first-run.log 2>&1
+          first_status=$?
+          set -e
+          test -f eula.txt || { cat first-run.log; exit 1; }
+          test -f server.properties || { cat first-run.log; exit 1; }
+          echo "Initial server process exited with status $first_status; generated files are present."
+
+      - name: Accept EULA and configure generated server.properties
+        working-directory: build/server
+        env:
+          HAS_RESOURCE_PACK: ${{ env.HAS_RESOURCE_PACK }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'eula=true\n' > eula.txt
+
+          set_property() {
+            local key="$1"
+            local value="$2"
+            if grep -q "^${key}=" server.properties; then
+              sed -i "s|^${key}=.*|${key}=${value}|" server.properties
+            else
+              printf '%s=%s\n' "$key" "$value" >> server.properties
+            fi
+          }
+
+          # Deliberately blank: the VPS's Minecraft process should bind normally.
+          set_property server-ip ""
+          set_property server-port "25565"
+
+          if [ "$HAS_RESOURCE_PACK" = "true" ]; then
+            pack_sha1="$(sha1sum resource-pack.zip | awk '{print $1}')"
+            set_property resource-pack "__LOCAL_RESOURCE_PACK_URL__"
+            set_property resource-pack-sha1 "$pack_sha1"
+          else
+            set_property resource-pack ""
+            set_property resource-pack-sha1 ""
+          fi
+
+          # Optional repo file: config/server.properties
+          # Non-comment key=value lines override generated properties.
+          if [ -f "$GITHUB_WORKSPACE/config/server.properties" ]; then
+            while IFS= read -r line || [ -n "$line" ]; do
+              case "$line" in
+                ''|'#'*|';'*) continue ;;
+              esac
+              if [[ "$line" != *=* ]]; then
+                echo "::error::Invalid line in config/server.properties: $line"
+                exit 1
+              fi
+              key="${line%%=*}"
+              value="${line#*=}"
+              set_property "$key" "$value"
+            done < "$GITHUB_WORKSPACE/config/server.properties"
+            set_property server-ip ""
+            set_property server-port "25565"
+          fi
+
+      - name: Verify server reaches Done
+        working-directory: build/server
+        env:
+          HAS_RESOURCE_PACK: ${{ env.HAS_RESOURCE_PACK }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # The pack URL will only become real on the future VPS.
+          if [ "$HAS_RESOURCE_PACK" = "true" ]; then
+            sed -i 's|^resource-pack=.*|resource-pack=|' server.properties
+          fi
+
+          rm -f verify.log console.pipe
+          mkfifo console.pipe
+
+          java -Xms1G -Xmx4G -jar server.jar nogui <console.pipe >verify.log 2>&1 &
+          server_pid=$!
+          exec 3>console.pipe
+
+          cleanup() {
+            if kill -0 "$server_pid" 2>/dev/null; then
+              printf 'stop\n' >&3 || true
+              sleep 5 || true
+              kill -TERM "$server_pid" 2>/dev/null || true
+            fi
+            exec 3>&- || true
+            rm -f console.pipe
+          }
+          trap cleanup EXIT
+
+          for _ in $(seq 1 180); do
+            if grep -q 'Done (' verify.log; then
+              echo "Minecraft reached Done."
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo "::error::Minecraft exited before reaching Done."
+              cat verify.log
+              exit 1
+            fi
+            sleep 1
+            if [ "$_" -eq 180 ]; then
+              echo "::error::Minecraft did not reach Done within 180 seconds."
+              cat verify.log
+              exit 1
+            fi
+          done
+
+          sleep 5
+
+      - name: Prepare final resource-pack hosting directory
+        if: env.HAS_RESOURCE_PACK == 'true'
+        working-directory: build/server
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p resource-pack-host
+          mv resource-pack.zip resource-pack-host/resource-pack.zip
+          sed -i 's|^resource-pack=.*|resource-pack=__LOCAL_RESOURCE_PACK_URL__|' server.properties
+          test -f resource-pack-host/resource-pack.zip
+
+      - name: Generate Linux VPS start.sh
+        working-directory: build/server
+        env:
+          MC_VERSION: ${{ inputs.version }}
+          JAVA_VERSION: ${{ env.JAVA_VERSION }}
+          HAS_RESOURCE_PACK: ${{ env.HAS_RESOURCE_PACK }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > start.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          cd "$BASE_DIR"
+
+          SERVER_JAR="server.jar"
+          MC_VERSION="__MC_VERSION__"
+          REQUIRED_JAVA_MAJOR="__JAVA_VERSION__"
+          HAS_RESOURCE_PACK="__HAS_RESOURCE_PACK__"
+          RESOURCE_PACK_PORT=8080
+          JAVA_DIR="$BASE_DIR/.java/temurin-$REQUIRED_JAVA_MAJOR"
+          JAVA_BIN="$JAVA_DIR/bin/java"
+
+          as_root() {
+            if [ "$(id -u)" -eq 0 ]; then "$@"; elif command -v sudo >/dev/null 2>&1; then sudo "$@"; else echo "ERROR: sudo is unavailable."; exit 1; fi
+          }
+
+          install_dependencies() {
+            need_python="$1"
+            if command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1 && [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+              if [ "$need_python" = "false" ] || command -v python3 >/dev/null 2>&1; then return; fi
+            fi
+
+            case "$(command -v apt-get >/dev/null 2>&1 && echo apt || command -v dnf >/dev/null 2>&1 && echo dnf || command -v yum >/dev/null 2>&1 && echo yum || command -v zypper >/dev/null 2>&1 && echo zypper || command -v apk >/dev/null 2>&1 && echo apk || echo unknown)" in
+              apt)
+                as_root apt-get update
+                if [ "$need_python" = "true" ]; then as_root apt-get install -y curl ca-certificates tar gzip python3; else as_root apt-get install -y curl ca-certificates tar gzip; fi
+                ;;
+              dnf)
+                if [ "$need_python" = "true" ]; then as_root dnf install -y curl ca-certificates tar gzip python3; else as_root dnf install -y curl ca-certificates tar gzip; fi
+                ;;
+              yum)
+                if [ "$need_python" = "true" ]; then as_root yum install -y curl ca-certificates tar gzip python3; else as_root yum install -y curl ca-certificates tar gzip; fi
+                ;;
+              zypper)
+                if [ "$need_python" = "true" ]; then as_root zypper --non-interactive install curl ca-certificates tar gzip python3; else as_root zypper --non-interactive install curl ca-certificates tar gzip; fi
+                ;;
+              apk)
+                if [ "$need_python" = "true" ]; then as_root apk add curl ca-certificates tar gzip python3; else as_root apk add curl ca-certificates tar gzip; fi
+                ;;
+              *) echo "ERROR: Unsupported Linux package manager."; exit 1 ;;
+            esac
+          }
+
+          java_major() {
+            raw="$(java -version 2>&1 | awk -F '"' '/version/ {print $2; exit}')"
+            case "$raw" in 1.8*) echo 8;; *) echo "${raw%%.*}";; esac
+          }
+
+          install_java() {
+            if [ -x "$JAVA_BIN" ]; then
+              if [ "$(JAVA_HOME="$JAVA_DIR" "$JAVA_BIN" -version 2>&1 | awk -F '"' '/version/ {print $2; exit}')" != "" ]; then
+                export JAVA_HOME="$JAVA_DIR"
+                export PATH="$JAVA_HOME/bin:$PATH"
+                installed="$(java_major)"
+                if [ "$installed" = "$REQUIRED_JAVA_MAJOR" ]; then return; fi
+              fi
+            fi
+
+            install_dependencies false
+            mkdir -p "$BASE_DIR/.java"
+            rm -rf "$JAVA_DIR"
+            mkdir -p "$JAVA_DIR"
+
+            archive="$(mktemp "$BASE_DIR/.java/temurin.XXXXXX.tar.gz")"
+            api="https://api.adoptium.net/v3/binary/latest/${REQUIRED_JAVA_MAJOR}/ga/linux/x64/jre/hotspot/normal/eclipse"
+
+            if ! curl --fail --location --retry 5 --retry-delay 2 -o "$archive" "$api"; then
+              api="https://api.adoptium.net/v3/binary/latest/${REQUIRED_JAVA_MAJOR}/ga/linux/x64/jdk/hotspot/normal/eclipse"
+              curl --fail --location --retry 5 --retry-delay 2 -o "$archive" "$api"
+            fi
+
+            tar -xzf "$archive" -C "$JAVA_DIR" --strip-components=1
+            rm -f "$archive"
+
+            export JAVA_HOME="$JAVA_DIR"
+            export PATH="$JAVA_HOME/bin:$PATH"
+
+            installed="$(java_major)"
+            if [ "$installed" != "$REQUIRED_JAVA_MAJOR" ]; then
+              echo "ERROR: Java $installed installed; Java $REQUIRED_JAVA_MAJOR required."
+              exit 1
+            fi
+          }
+
+          install_java
+
+          echo "Minecraft version: $MC_VERSION"
+          echo "Java: $REQUIRED_JAVA_MAJOR"
+          echo
+
+          read -r -p "Minimum RAM (GB, whole number): " MIN_RAM_GB
+          read -r -p "Maximum RAM (GB, whole number): " MAX_RAM_GB
+
+          [[ "$MIN_RAM_GB" =~ ^[1-9][0-9]*$ ]] || { echo "Minimum RAM must be a positive whole number."; exit 1; }
+          [[ "$MAX_RAM_GB" =~ ^[1-9][0-9]*$ ]] || { echo "Maximum RAM must be a positive whole number."; exit 1; }
+          [ "$MIN_RAM_GB" -le "$MAX_RAM_GB" ] || { echo "Minimum RAM cannot exceed maximum RAM."; exit 1; }
+
+          resource_pid=""
+          cleanup() { if [ -n "$resource_pid" ] && kill -0 "$resource_pid" 2>/dev/null; then kill "$resource_pid" 2>/dev/null || true; wait "$resource_pid" 2>/dev/null || true; fi; }
+          trap cleanup EXIT
+
+          if [ "$HAS_RESOURCE_PACK" = "true" ]; then
+            install_dependencies true
+            test -f "$BASE_DIR/resource-pack-host/resource-pack.zip"
+
+            python3 -m http.server "$RESOURCE_PACK_PORT" --bind 0.0.0.0 --directory "$BASE_DIR/resource-pack-host" >/tmp/minecraft-resource-pack-http.log 2>&1 &
+            resource_pid=$!
+            sleep 1
+            kill -0 "$resource_pid" 2>/dev/null || { cat /tmp/minecraft-resource-pack-http.log || true; exit 1; }
+
+            public_ip="$(curl -4 --fail --silent --show-error --max-time 10 https://api.ipify.org)"
+            pack_url="http://${public_ip}:${RESOURCE_PACK_PORT}/resource-pack.zip"
+
+            if grep -q '^resource-pack=' server.properties; then
+              sed -i "s|^resource-pack=.*|resource-pack=${pack_url}|" server.properties
+            else
+              printf 'resource-pack=%s\n' "$pack_url" >> server.properties
+            fi
+
+            echo "Resource pack URL: $pack_url"
+            echo "Make TCP port 8080 reachable from the Internet for the players."
+          fi
+
+          exec "$JAVA_BIN" -Xms"${MIN_RAM_GB}G" -Xmx"${MAX_RAM_GB}G" -jar "$SERVER_JAR" nogui
+          SCRIPT
+
+          sed -i "s|__MC_VERSION__|$MC_VERSION|g" start.sh
+          sed -i "s|__JAVA_VERSION__|$JAVA_VERSION|g" start.sh
+          sed -i "s|__HAS_RESOURCE_PACK__|$HAS_RESOURCE_PACK|g" start.sh
+          chmod +x start.sh
+
+      - name: Clean and validate final server
+        working-directory: build/server
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f first-run.log verify.log console.pipe
+          rm -rf logs crash-reports
+          test -s server.jar
+          test -f world/level.dat
+          test -f eula.txt
+          test -f server.properties
+          test -x start.sh
+          if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then test -s resource-pack-host/resource-pack.zip; fi
+
+      - name: Package server ZIP
+        env:
+          SERVER_NAME: ${{ inputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SAFE_NAME="$(printf '%s' "$SERVER_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g; s/-\+/-/g; s/^-//; s/-$//')"
+          [ -n "$SAFE_NAME" ] || SAFE_NAME=minecraft-server
+          ZIP_NAME="${SAFE_NAME}.zip"
+
+          rm -rf build/package
+          mkdir -p "build/package/$SAFE_NAME"
+          cp -a build/server/. "build/package/$SAFE_NAME/"
+
+          cd build/package
+          zip -qr -6 "../../$ZIP_NAME" "$SAFE_NAME"
+          cd ../..
+
+          size_bytes="$(stat -c '%s' "$ZIP_NAME")"
+          max_bytes=$((2 * 1024 * 1024 * 1024))
+          if [ "$size_bytes" -ge "$max_bytes" ]; then
+            echo "::error::Server ZIP is not below the 2 GiB GitHub Release asset limit."
+            exit 1
+          fi
+
+          echo "SAFE_NAME=$SAFE_NAME" >> "$GITHUB_ENV"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          ls -lh "$ZIP_NAME"
+
+      - name: Publish GitHub Release and upload ZIP
+        id: release
+        uses: softprops/action-gh-release@v3
+        with:
+          token: ${{ github.token }}
+          tag_name: ${{ env.SAFE_NAME }}-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: ${{ inputs.name }} — Minecraft ${{ inputs.version }}
+          body: |
+            ${{ inputs.description }}
+
+            ## Server download
+
+            The exact VPS commands are added automatically after the ZIP is uploaded.
+          files: ${{ env.ZIP_NAME }}
+
+      - name: Get exact release asset URL
+        env:
+          ASSETS_JSON: ${{ steps.release.outputs.assets }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET_URL="$(printf '%s' "$ASSETS_JSON" | jq -r --arg n "$ZIP_NAME" '.[] | select(.name == $n) | .browser_download_url' | head -n1)"
+          [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ] || { echo "::error::Could not determine release asset browser_download_url."; exit 1; }
+          echo "ASSET_URL=$ASSET_URL" >> "$GITHUB_ENV"
+
+      - name: Write exact VPS instructions into release description
+        env:
+          GH_TOKEN: ${{ github.token }}
+          USER_DESCRIPTION: ${{ inputs.description }}
+          SERVER_NAME: ${{ inputs.name }}
+          MC_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${SAFE_NAME}-${MC_VERSION}-${{ github.run_id }}-${{ github.run_attempt }}"
+
+          {
+            printf '%s\n\n' "$USER_DESCRIPTION"
+            echo "## Server information"
+            echo
+            echo "- **Name:** $SERVER_NAME"
+            echo "- **Minecraft version:** $MC_VERSION"
+            echo "- **Java:** Java $JAVA_VERSION"
+            if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then
+              echo "- **Resource pack:** Included; start.sh serves it locally on TCP 8080"
+            else
+              echo "- **Resource pack:** None"
+            fi
+            echo
+            echo "## Exact commands for a fresh Linux VPS"
+            echo
+            echo "### 1. Download the prepared server"
+            echo '```bash'
+            printf "curl -fL '%s' -o '%s'\n" "$ASSET_URL" "$ZIP_NAME"
+            echo '```'
+            echo
+            echo "### 2. Install the lightweight ZIP extractor"
+            echo '```bash'
+            echo 'sudo apt-get update && sudo apt-get install -y unzip'
+            echo '```'
+            echo
+            echo "### 3. Extract the server"
+            echo '```bash'
+            printf "unzip '%s'\n" "$ZIP_NAME"
+            echo '```'
+            echo
+            echo "### 4. Navigate to the extracted server directory"
+            echo '```bash'
+            printf "cd '%s'\n" "$SAFE_NAME"
+            echo '```'
+            echo
+            echo "### 5. Ensure the start script is executable"
+            echo '```bash'
+            echo 'chmod +x start.sh'
+            echo '```'
+            echo
+            echo "### 6. Start the server"
+            echo '```bash'
+            echo './start.sh'
+            echo '```'
+            echo
+            echo "The start script installs/downloads the exact required Java major version and then asks for minimum and maximum RAM in whole GB."
+            if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then
+              echo
+              echo "### Resource-pack networking"
+              echo
+              echo "The script serves the included resource-pack ZIP from the VPS on TCP port 8080. That port must be reachable by the players' Minecraft clients; also allow it in the VPS/provider firewall if needed."
+            fi
+          } > release-notes.md
+
+          gh release edit "$TAG" --notes-file release-notes.md
+
+      - name: Print final release URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${SAFE_NAME}-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          gh release view "$TAG" --json url,name --jq '"Release: \(.name)\nURL: \(.url)"'
