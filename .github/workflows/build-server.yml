@@ -274,6 +274,7 @@ jobs:
         working-directory: build/server
         env:
           HAS_RESOURCE_PACK: ${{ env.HAS_RESOURCE_PACK }}
+          MC_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -289,21 +290,54 @@ jobs:
             fi
           }
 
-          # Deliberately blank: the VPS's Minecraft process should bind normally.
+          # These are deliberate map-friendly defaults. We do not try to
+          # rewrite gameplay choices such as gamemode, difficulty, PVP,
+          # mob spawning, view distance, etc.; the map/server version
+          # should keep those semantics.
+          set_property online-mode "false"
+          set_property enable-command-block "true"
+          set_property allow-flight "true"
+          set_property spawn-protection "0"
+          set_property force-gamemode "false"
+          set_property white-list "false"
+          set_property level-name "world"
+
+          # Keep the server bound normally; do NOT hard-code a VPS IP.
           set_property server-ip ""
           set_property server-port "25565"
 
+          # Starting with 1.19.1, secure-profile enforcement is a separate
+          # setting. Since this builder deliberately uses online-mode=false,
+          # disable that enforcement too when the property exists.
+          if [ "$(printf '%s\n' "$MC_VERSION" "1.19.1" | sort -V | head -n1)" = "1.19.1" ]; then
+            set_property enforce-secure-profile "false"
+          fi
+
           if [ "$HAS_RESOURCE_PACK" = "true" ]; then
             pack_sha1="$(sha1sum resource-pack.zip | awk '{print $1}')"
-            set_property resource-pack "__LOCAL_RESOURCE_PACK_URL__"
+            set_property resource-pack ""
             set_property resource-pack-sha1 "$pack_sha1"
+
+            # The resource pack is OPTIONAL. Do not set require-resource-pack.
+            # A normal resource-pack URL causes Minecraft to offer the pack.
+            if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
+              set_property require-resource-pack "false"
+              set_property resource-pack-prompt '{"text":"This server has a custom resource pack."}'
+            fi
           else
             set_property resource-pack ""
             set_property resource-pack-sha1 ""
+
+            if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
+              set_property require-resource-pack "false"
+              set_property resource-pack-prompt ""
+            fi
           fi
 
           # Optional repo file: config/server.properties
-          # Non-comment key=value lines override generated properties.
+          # Non-comment key=value lines are applied first as optional
+          # customizations, then the mandatory builder settings above are
+          # re-applied so a stale config cannot break the generated server.
           if [ -f "$GITHUB_WORKSPACE/config/server.properties" ]; then
             while IFS= read -r line || [ -n "$line" ]; do
               case "$line" in
@@ -317,8 +351,39 @@ jobs:
               value="${line#*=}"
               set_property "$key" "$value"
             done < "$GITHUB_WORKSPACE/config/server.properties"
-            set_property server-ip ""
-            set_property server-port "25565"
+          fi
+
+          # Re-apply non-negotiable builder settings after optional config.
+          set_property online-mode "false"
+          set_property enable-command-block "true"
+          set_property allow-flight "true"
+          set_property spawn-protection "0"
+          set_property force-gamemode "false"
+          set_property white-list "false"
+          set_property level-name "world"
+          set_property server-ip ""
+          set_property server-port "25565"
+          if [ "$(printf '%s\n' "$MC_VERSION" "1.19.1" | sort -V | head -n1)" = "1.19.1" ]; then
+            set_property enforce-secure-profile "false"
+          fi
+
+          # Re-apply the resource-pack settings after optional config so the
+          # detected/downloaded pack is always the pack actually served.
+          if [ "$HAS_RESOURCE_PACK" = "true" ]; then
+            pack_sha1="$(sha1sum resource-pack.zip | awk '{print $1}')"
+            set_property resource-pack ""
+            set_property resource-pack-sha1 "$pack_sha1"
+            if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
+              set_property require-resource-pack "false"
+              set_property resource-pack-prompt '{"text":"This server has a custom resource pack."}'
+            fi
+          else
+            set_property resource-pack ""
+            set_property resource-pack-sha1 ""
+            if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
+              set_property require-resource-pack "false"
+              set_property resource-pack-prompt ""
+            fi
           fi
 
       - name: Verify server reaches Done
@@ -329,9 +394,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The pack URL will only become real on the future VPS.
+          # The real pack URL is injected by start.sh on the VPS.
+          # During the workflow run we test the server with the property
+          # temporarily blank so the runner does not need to be reachable
+          # from external Minecraft clients.
           if [ "$HAS_RESOURCE_PACK" = "true" ]; then
             sed -i 's|^resource-pack=.*|resource-pack=|' server.properties
+            if grep -q '^require-resource-pack=' server.properties; then
+              sed -i 's|^require-resource-pack=.*|require-resource-pack=false|' server.properties
+            fi
           fi
 
           rm -f verify.log console.pipe
@@ -380,7 +451,7 @@ jobs:
           set -euo pipefail
           mkdir -p resource-pack-host
           mv resource-pack.zip resource-pack-host/resource-pack.zip
-          sed -i 's|^resource-pack=.*|resource-pack=__LOCAL_RESOURCE_PACK_URL__|' server.properties
+          sed -i 's|^resource-pack=.*|resource-pack=|' server.properties
           test -f resource-pack-host/resource-pack.zip
 
       - name: Generate Linux VPS start.sh
@@ -515,11 +586,20 @@ jobs:
               printf 'resource-pack=%s\n' "$pack_url" >> server.properties
             fi
 
+            # The resource pack is optional. Do not force acceptance.
             echo "Resource pack URL: $pack_url"
             echo "Make TCP port 8080 reachable from the Internet for the players."
           fi
 
-          exec "$JAVA_BIN" -Xms"${MIN_RAM_GB}G" -Xmx"${MAX_RAM_GB}G" -jar "$SERVER_JAR" nogui
+          "$JAVA_BIN" -Xms"${MIN_RAM_GB}G" -Xmx"${MAX_RAM_GB}G" -jar "$SERVER_JAR" nogui &
+          server_pid=$!
+
+          wait "$server_pid"
+          server_status=$?
+
+          # cleanup() runs from the EXIT trap and stops the resource-pack
+          # HTTP server before start.sh exits, freeing TCP port 8080.
+          exit "$server_status"
           SCRIPT
 
           sed -i "s|__MC_VERSION__|$MC_VERSION|g" start.sh
@@ -616,9 +696,15 @@ jobs:
             echo "- **Java:** Java $JAVA_VERSION"
             if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then
               echo "- **Resource pack:** Included; start.sh serves it locally on TCP 8080"
+              if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
+                echo "- **Resource-pack behavior:** Required on Minecraft 1.17+"
+              else
+                echo "- **Resource-pack behavior:** Optional prompt on versions before 1.17; the client/server resource-pack setting must permit prompts"
+              fi
             else
               echo "- **Resource pack:** None"
             fi
+            echo "- **Map-friendly defaults:** command blocks enabled, flight allowed, spawn protection disabled, online authentication disabled"
             echo
             echo "## Exact commands for a fresh Linux VPS"
             echo
