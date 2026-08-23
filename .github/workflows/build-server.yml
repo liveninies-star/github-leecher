@@ -16,9 +16,14 @@ on:
         required: true
         type: string
       resource_pack_url:
-        description: "Optional direct download URL for a resource-pack ZIP. If empty, search the world ZIP."
+        description: "Optional direct download URL for a resource-pack ZIP. If empty, search the world ZIP when automatic detection is enabled."
         required: false
         type: string
+      detect_resource_pack:
+        description: "Automatically search the world ZIP for a resource pack when no resource-pack URL is supplied."
+        required: false
+        default: true
+        type: boolean
       description:
         description: "Description shown at the top of the GitHub Release"
         required: false
@@ -99,7 +104,7 @@ jobs:
             1.10.1|8|https://piston-data.mojang.com/v1/objects/cb4c6f9f51a845b09a8861cdbe0eea3ff6996dee/server.jar
             1.10|8|https://piston-data.mojang.com/v1/objects/a96617ffdf5dabbb718ab11a9a68e50545fc5bee/server.jar
             1.9.4|8|https://piston-data.mojang.com/v1/objects/edbb7b1758af33d365bf835eb9d13de005b1e274/server.jar
-            1.9.3|8|https://piston-data.mojang.com/v1/objects/8e897b6b6d784f745332644f4d104f7a6e737ccf/server.jar
+            1.9.3|8|https://piston-data.mojang.com/v1/objects/8e897b6d784f745332644f4d104f7a6e737ccf/server.jar
             1.9.2|8|https://piston-data.mojang.com/v1/objects/2b95cc7b136017e064c46d04a5825fe4cfa1be30/server.jar
             1.9.1|8|https://piston-data.mojang.com/v1/objects/bf95d9118d9b4b827f524c878efd275125b56181/server.jar
             1.9|8|https://piston-data.mojang.com/v1/objects/b4d449cf2918e0f3bd8aa18954b916a4d1880f0d/server.jar
@@ -111,7 +116,7 @@ jobs:
             1.8.4|8|https://launcher.mojang.com/v1/objects/dd4b5eba1c79500390e0b0f45162fa70d38f8a3d/server.jar
             1.8.3|8|https://launcher.mojang.com/v1/objects/163ba351cb86f6390450bb2a67fafeb92b6c0f2f/server.jar
             1.8.2|8|https://launcher.mojang.com/v1/objects/a37bdd5210137354ed1bfe3dac0a5b77fe08fe2e/server.jar
-            1.8.1|8|https://launcher.mojang.com/v1/objects/68bfb524888f7c0ab939025e07e5de08843dac0f/server.jar
+            1.8.1|8|https://launcher.mojang.com/v1/objects/68bfb524888f7c0ab939025e07e5de08843dac0/server.jar
             1.8|8|https://launcher.mojang.com/v1/objects/a028f00e678ee5c6aef0e29656dca091b5df11c7/server.jar
         shell: bash
         run: |
@@ -154,8 +159,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --location --retry 5 --retry-delay 2 \
-            --output build/downloads/world.zip "${{ inputs.world_url }}"
+          curl \
+            --fail \
+            --show-error \
+            --location \
+            --proto '=https,http' \
+            --proto-redir '=https,http' \
+            --retry 5 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            --output build/downloads/world.zip \
+            "${{ inputs.world_url }}"
           test -s build/downloads/world.zip
           unzip -tq build/downloads/world.zip >/dev/null
 
@@ -182,6 +196,7 @@ jobs:
       - name: Resolve resource pack
         env:
           EXPLICIT_RESOURCE_PACK_URL: ${{ inputs.resource_pack_url }}
+          AUTO_DETECT_RESOURCE_PACK: ${{ inputs.detect_resource_pack }}
         shell: bash
         run: |
           set -euo pipefail
@@ -219,6 +234,13 @@ jobs:
               build/resource-pack-work/explicit \
               build/server/resource-pack.zip
             echo "HAS_RESOURCE_PACK=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          if [ "$AUTO_DETECT_RESOURCE_PACK" != "true" ]; then
+            echo "Automatic resource-pack detection disabled."
+            echo "No explicit resource-pack URL supplied."
+            echo "HAS_RESOURCE_PACK=false" >> "$GITHUB_ENV"
             exit 0
           fi
 
