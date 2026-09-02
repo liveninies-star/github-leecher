@@ -109,7 +109,7 @@ jobs:
             1.9.1|8|https://piston-data.mojang.com/v1/objects/bf95d9118d9b4b827f524c878efd275125b56181/server.jar
             1.9|8|https://piston-data.mojang.com/v1/objects/b4d449cf2918e0f3bd8aa18954b916a4d1880f0d/server.jar
             1.8.9|8|https://launcher.mojang.com/v1/objects/b58b2ceb36e01bcd8dbf49c8fb66c55a9f0676cd/server.jar
-            1.8.8|8|https://launcher.mojang.com/v1/objects/5fafba3f58c40dc51b5c3ca72a98f62dfdae1db7/server.jar
+            1.8.8|8|https://launcher.mojang.com/v1/objects/5fafba3f58c40dc51b5c3ca72a98f62dfdae1db/server.jar
             1.8.7|8|https://launcher.mojang.com/v1/objects/35c59e16d1f3b751cd20b76b9b8a19045de363a9/server.jar
             1.8.6|8|https://launcher.mojang.com/v1/objects/2bd44b53198f143fb278f8bec3a505dad0beacd2/server.jar
             1.8.5|8|https://launcher.mojang.com/v1/objects/ea6dd23658b167dbc0877015d1072cac21ab6eee/server.jar
@@ -117,7 +117,7 @@ jobs:
             1.8.3|8|https://launcher.mojang.com/v1/objects/163ba351cb86f6390450bb2a67fafeb92b6c0f2f/server.jar
             1.8.2|8|https://launcher.mojang.com/v1/objects/a37bdd5210137354ed1bfe3dac0a5b77fe08fe2e/server.jar
             1.8.1|8|https://launcher.mojang.com/v1/objects/68bfb524888f7c0ab939025e07e5de08843dac0/server.jar
-            1.8|8|https://launcher.mojang.com/v1/objects/a028f00e678ee5c6aef0e29656dca091b5df11c7/server.jar
+            1.8|8|https://piston-data.mojang.com/v1/objects/a028f00e678ee5c6aef0e29656dca091b5df11c/server.jar
         shell: bash
         run: |
           IFS='|' read -r SELECTED_VERSION JAVA_VERSION SERVER_JAR_URL < <(
@@ -312,10 +312,6 @@ jobs:
             fi
           }
 
-          # These are deliberate map-friendly defaults. We do not try to
-          # rewrite gameplay choices such as gamemode, difficulty, PVP,
-          # mob spawning, view distance, etc.; the map/server version
-          # should keep those semantics.
           set_property online-mode "false"
           set_property enable-command-block "true"
           set_property allow-flight "true"
@@ -324,13 +320,9 @@ jobs:
           set_property white-list "false"
           set_property level-name "world"
 
-          # Keep the server bound normally; do NOT hard-code a VPS IP.
           set_property server-ip ""
           set_property server-port "25565"
 
-          # Starting with 1.19.1, secure-profile enforcement is a separate
-          # setting. Since this builder deliberately uses online-mode=false,
-          # disable that enforcement too when the property exists.
           if [ "$(printf '%s\n' "$MC_VERSION" "1.19.1" | sort -V | head -n1)" = "1.19.1" ]; then
             set_property enforce-secure-profile "false"
           fi
@@ -340,8 +332,6 @@ jobs:
             set_property resource-pack ""
             set_property resource-pack-sha1 "$pack_sha1"
 
-            # The resource pack is OPTIONAL. Do not set require-resource-pack.
-            # A normal resource-pack URL causes Minecraft to offer the pack.
             if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
               set_property require-resource-pack "false"
               set_property resource-pack-prompt '{"text":"This server has a custom resource pack."}'
@@ -356,10 +346,6 @@ jobs:
             fi
           fi
 
-          # Optional repo file: config/server.properties
-          # Non-comment key=value lines are applied first as optional
-          # customizations, then the mandatory builder settings above are
-          # re-applied so a stale config cannot break the generated server.
           if [ -f "$GITHUB_WORKSPACE/config/server.properties" ]; then
             while IFS= read -r line || [ -n "$line" ]; do
               case "$line" in
@@ -375,7 +361,6 @@ jobs:
             done < "$GITHUB_WORKSPACE/config/server.properties"
           fi
 
-          # Re-apply non-negotiable builder settings after optional config.
           set_property online-mode "false"
           set_property enable-command-block "true"
           set_property allow-flight "true"
@@ -385,12 +370,11 @@ jobs:
           set_property level-name "world"
           set_property server-ip ""
           set_property server-port "25565"
+
           if [ "$(printf '%s\n' "$MC_VERSION" "1.19.1" | sort -V | head -n1)" = "1.19.1" ]; then
             set_property enforce-secure-profile "false"
           fi
 
-          # Re-apply the resource-pack settings after optional config so the
-          # detected/downloaded pack is always the pack actually served.
           if [ "$HAS_RESOURCE_PACK" = "true" ]; then
             pack_sha1="$(sha1sum resource-pack.zip | awk '{print $1}')"
             set_property resource-pack ""
@@ -416,10 +400,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The real pack URL is injected by start.sh on the VPS.
-          # During the workflow run we test the server with the property
-          # temporarily blank so the runner does not need to be reachable
-          # from external Minecraft clients.
           if [ "$HAS_RESOURCE_PACK" = "true" ]; then
             sed -i 's|^resource-pack=.*|resource-pack=|' server.properties
             if grep -q '^require-resource-pack=' server.properties; then
@@ -500,41 +480,81 @@ jobs:
           RESOURCE_PACK_PORT=8080
           JAVA_DIR="$BASE_DIR/.java/temurin-$REQUIRED_JAVA_MAJOR"
           JAVA_BIN="$JAVA_DIR/bin/java"
+          PID_FILE="$BASE_DIR/.minecraft-server.pid"
 
           as_root() {
-            if [ "$(id -u)" -eq 0 ]; then "$@"; elif command -v sudo >/dev/null 2>&1; then sudo "$@"; else echo "ERROR: sudo is unavailable."; exit 1; fi
+            if [ "$(id -u)" -eq 0 ]; then
+              "$@"
+            elif command -v sudo >/dev/null 2>&1; then
+              sudo "$@"
+            else
+              echo "ERROR: sudo is unavailable."
+              exit 1
+            fi
           }
 
           install_dependencies() {
             need_python="$1"
-            if command -v curl >/dev/null 2>&1 && command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1 && [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-              if [ "$need_python" = "false" ] || command -v python3 >/dev/null 2>&1; then return; fi
+
+            if command -v curl >/dev/null 2>&1 &&
+               command -v tar >/dev/null 2>&1 &&
+               command -v gzip >/dev/null 2>&1 &&
+               [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+              if [ "$need_python" = "false" ] || command -v python3 >/dev/null 2>&1; then
+                return
+              fi
             fi
 
             case "$(command -v apt-get >/dev/null 2>&1 && echo apt || command -v dnf >/dev/null 2>&1 && echo dnf || command -v yum >/dev/null 2>&1 && echo yum || command -v zypper >/dev/null 2>&1 && echo zypper || command -v apk >/dev/null 2>&1 && echo apk || echo unknown)" in
               apt)
                 as_root apt-get update
-                if [ "$need_python" = "true" ]; then as_root apt-get install -y curl ca-certificates tar gzip python3; else as_root apt-get install -y curl ca-certificates tar gzip; fi
+                if [ "$need_python" = "true" ]; then
+                  as_root apt-get install -y curl ca-certificates tar gzip python3
+                else
+                  as_root apt-get install -y curl ca-certificates tar gzip
+                fi
                 ;;
               dnf)
-                if [ "$need_python" = "true" ]; then as_root dnf install -y curl ca-certificates tar gzip python3; else as_root dnf install -y curl ca-certificates tar gzip; fi
+                if [ "$need_python" = "true" ]; then
+                  as_root dnf install -y curl ca-certificates tar gzip python3
+                else
+                  as_root dnf install -y curl ca-certificates tar gzip
+                fi
                 ;;
               yum)
-                if [ "$need_python" = "true" ]; then as_root yum install -y curl ca-certificates tar gzip python3; else as_root yum install -y curl ca-certificates tar gzip; fi
+                if [ "$need_python" = "true" ]; then
+                  as_root yum install -y curl ca-certificates tar gzip python3
+                else
+                  as_root yum install -y curl ca-certificates tar gzip
+                fi
                 ;;
               zypper)
-                if [ "$need_python" = "true" ]; then as_root zypper --non-interactive install curl ca-certificates tar gzip python3; else as_root zypper --non-interactive install curl ca-certificates tar gzip; fi
+                if [ "$need_python" = "true" ]; then
+                  as_root zypper --non-interactive install curl ca-certificates tar gzip python3
+                else
+                  as_root zypper --non-interactive install curl ca-certificates tar gzip
+                fi
                 ;;
               apk)
-                if [ "$need_python" = "true" ]; then as_root apk add curl ca-certificates tar gzip python3; else as_root apk add curl ca-certificates tar gzip; fi
+                if [ "$need_python" = "true" ]; then
+                  as_root apk add curl ca-certificates tar gzip python3
+                else
+                  as_root apk add curl ca-certificates tar gzip
+                fi
                 ;;
-              *) echo "ERROR: Unsupported Linux package manager."; exit 1 ;;
+              *)
+                echo "ERROR: Unsupported Linux package manager."
+                exit 1
+                ;;
             esac
           }
 
           java_major() {
             raw="$(java -version 2>&1 | awk -F '"' '/version/ {print $2; exit}')"
-            case "$raw" in 1.8*) echo 8;; *) echo "${raw%%.*}";; esac
+            case "$raw" in
+              1.8*) echo 8 ;;
+              *) echo "${raw%%.*}" ;;
+            esac
           }
 
           install_java() {
@@ -543,7 +563,9 @@ jobs:
                 export JAVA_HOME="$JAVA_DIR"
                 export PATH="$JAVA_HOME/bin:$PATH"
                 installed="$(java_major)"
-                if [ "$installed" = "$REQUIRED_JAVA_MAJOR" ]; then return; fi
+                if [ "$installed" = "$REQUIRED_JAVA_MAJOR" ]; then
+                  return
+                fi
               fi
             fi
 
@@ -573,6 +595,16 @@ jobs:
             fi
           }
 
+          if [ -f "$PID_FILE" ]; then
+            existing_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+            if [[ "$existing_pid" =~ ^[0-9]+$ ]] && kill -0 "$existing_pid" 2>/dev/null; then
+              echo "Minecraft server is already running with PID $existing_pid."
+              echo "Stop it before starting another instance."
+              exit 1
+            fi
+            rm -f "$PID_FILE"
+          fi
+
           install_java
 
           echo "Minecraft version: $MC_VERSION"
@@ -582,22 +614,56 @@ jobs:
           read -r -p "Minimum RAM (GB, whole number): " MIN_RAM_GB
           read -r -p "Maximum RAM (GB, whole number): " MAX_RAM_GB
 
-          [[ "$MIN_RAM_GB" =~ ^[1-9][0-9]*$ ]] || { echo "Minimum RAM must be a positive whole number."; exit 1; }
-          [[ "$MAX_RAM_GB" =~ ^[1-9][0-9]*$ ]] || { echo "Maximum RAM must be a positive whole number."; exit 1; }
-          [ "$MIN_RAM_GB" -le "$MAX_RAM_GB" ] || { echo "Minimum RAM cannot exceed maximum RAM."; exit 1; }
+          [[ "$MIN_RAM_GB" =~ ^[1-9][0-9]*$ ]] || {
+            echo "Minimum RAM must be a positive whole number."
+            exit 1
+          }
+
+          [[ "$MAX_RAM_GB" =~ ^[1-9][0-9]*$ ]] || {
+            echo "Maximum RAM must be a positive whole number."
+            exit 1
+          }
+
+          [ "$MIN_RAM_GB" -le "$MAX_RAM_GB" ] || {
+            echo "Minimum RAM cannot exceed maximum RAM."
+            exit 1
+          }
 
           resource_pid=""
-          cleanup() { if [ -n "$resource_pid" ] && kill -0 "$resource_pid" 2>/dev/null; then kill "$resource_pid" 2>/dev/null || true; wait "$resource_pid" 2>/dev/null || true; fi; }
+          server_pid=""
+
+          cleanup() {
+            if [ -n "$server_pid" ]; then
+              if kill -0 "$server_pid" 2>/dev/null; then
+                kill -TERM "$server_pid" 2>/dev/null || true
+              fi
+            fi
+
+            rm -f "$PID_FILE"
+
+            if [ -n "$resource_pid" ] && kill -0 "$resource_pid" 2>/dev/null; then
+              kill "$resource_pid" 2>/dev/null || true
+              wait "$resource_pid" 2>/dev/null || true
+            fi
+          }
           trap cleanup EXIT
 
           if [ "$HAS_RESOURCE_PACK" = "true" ]; then
             install_dependencies true
             test -f "$BASE_DIR/resource-pack-host/resource-pack.zip"
 
-            python3 -m http.server "$RESOURCE_PACK_PORT" --bind 0.0.0.0 --directory "$BASE_DIR/resource-pack-host" >/tmp/minecraft-resource-pack-http.log 2>&1 &
+            python3 -m http.server "$RESOURCE_PACK_PORT" \
+              --bind 0.0.0.0 \
+              --directory "$BASE_DIR/resource-pack-host" \
+              >/tmp/minecraft-resource-pack-http.log 2>&1 &
             resource_pid=$!
+
             sleep 1
-            kill -0 "$resource_pid" 2>/dev/null || { cat /tmp/minecraft-resource-pack-http.log || true; exit 1; }
+
+            kill -0 "$resource_pid" 2>/dev/null || {
+              cat /tmp/minecraft-resource-pack-http.log || true
+              exit 1
+            }
 
             public_ip="$(curl -4 --fail --silent --show-error --max-time 10 https://api.ipify.org)"
             pack_url="http://${public_ip}:${RESOURCE_PACK_PORT}/resource-pack.zip"
@@ -608,19 +674,28 @@ jobs:
               printf 'resource-pack=%s\n' "$pack_url" >> server.properties
             fi
 
-            # The resource pack is optional. Do not force acceptance.
             echo "Resource pack URL: $pack_url"
             echo "Make TCP port 8080 reachable from the Internet for the players."
+          else
+            if grep -q '^resource-pack=' server.properties; then
+              sed -i 's|^resource-pack=.*|resource-pack=|' server.properties
+            fi
           fi
 
-          "$JAVA_BIN" -Xms"${MIN_RAM_GB}G" -Xmx"${MAX_RAM_GB}G" -jar "$SERVER_JAR" nogui &
+          "$JAVA_BIN" \
+            -Xms"${MIN_RAM_GB}G" \
+            -Xmx"${MAX_RAM_GB}G" \
+            -jar "$SERVER_JAR" \
+            nogui &
+
           server_pid=$!
+          printf '%s\n' "$server_pid" > "$PID_FILE"
 
           wait "$server_pid"
           server_status=$?
 
-          # cleanup() runs from the EXIT trap and stops the resource-pack
-          # HTTP server before start.sh exits, freeing TCP port 8080.
+          rm -f "$PID_FILE"
+
           exit "$server_status"
           SCRIPT
 
@@ -629,30 +704,311 @@ jobs:
           sed -i "s|__HAS_RESOURCE_PACK__|$HAS_RESOURCE_PACK|g" start.sh
           chmod +x start.sh
 
-      - name: Clean and validate final server
+      - name: Generate Linux VPS backup.sh
         working-directory: build/server
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -f first-run.log verify.log console.pipe
-          rm -rf logs crash-reports
-          test -s server.jar
-          test -f world/level.dat
-          test -f eula.txt
-          test -f server.properties
-          test -x start.sh
-          if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then test -s resource-pack-host/resource-pack.zip; fi
-
-      - name: Package server ZIP
         env:
           SERVER_NAME: ${{ inputs.name }}
+          MC_VERSION: ${{ inputs.version }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
 
           SAFE_NAME="$(printf '%s' "$SERVER_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g; s/-\+/-/g; s/^-//; s/-$//')"
           [ -n "$SAFE_NAME" ] || SAFE_NAME=minecraft-server
-          ZIP_NAME="${SAFE_NAME}.zip"
+
+          RELEASE_TAG="${SAFE_NAME}-${MC_VERSION}"
+
+          cat > backup.sh <<'SCRIPT'
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+          cd "$BASE_DIR"
+
+          SERVER_NAME="__SERVER_NAME__"
+          SAFE_NAME="__SAFE_NAME__"
+          MC_VERSION="__MC_VERSION__"
+          GITHUB_REPOSITORY="__GITHUB_REPOSITORY__"
+          RELEASE_TAG="__RELEASE_TAG__"
+
+          PID_FILE="$BASE_DIR/.minecraft-server.pid"
+          MAX_BYTES=$((2 * 1024 * 1024 * 1024))
+
+          as_root() {
+            if [ "$(id -u)" -eq 0 ]; then
+              "$@"
+            elif command -v sudo >/dev/null 2>&1; then
+              sudo "$@"
+            else
+              echo "ERROR: sudo is unavailable."
+              exit 1
+            fi
+          }
+
+          install_dependencies() {
+            local need_python="$1"
+
+            if command -v curl >/dev/null 2>&1 &&
+               command -v zip >/dev/null 2>&1 &&
+               command -v python3 >/dev/null 2>&1 &&
+               [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+              return
+            fi
+
+            case "$(command -v apt-get >/dev/null 2>&1 && echo apt || command -v dnf >/dev/null 2>&1 && echo dnf || command -v yum >/dev/null 2>&1 && echo yum || command -v zypper >/dev/null 2>&1 && echo zypper || command -v apk >/dev/null 2>&1 && echo apk || echo unknown)" in
+              apt)
+                as_root apt-get update
+                as_root apt-get install -y curl zip ca-certificates python3
+                ;;
+              dnf)
+                as_root dnf install -y curl zip ca-certificates python3
+                ;;
+              yum)
+                as_root yum install -y curl zip ca-certificates python3
+                ;;
+              zypper)
+                as_root zypper --non-interactive install curl zip ca-certificates python3
+                ;;
+              apk)
+                as_root apk add curl zip ca-certificates python3
+                ;;
+              *)
+                echo "ERROR: Unsupported Linux package manager."
+                exit 1
+                ;;
+            esac
+          }
+
+          find_running_server_pid() {
+            if [ -f "$PID_FILE" ]; then
+              local pid
+              pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+              if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+                printf '%s\n' "$pid"
+                return 0
+              fi
+            fi
+
+            return 1
+          }
+
+          stop_minecraft_cleanly() {
+            local pid="$1"
+
+            echo "Minecraft is running with PID $pid."
+            echo "The server must be stopped cleanly before creating the backup."
+            echo
+
+            read -r -p "Stop Minecraft and create the backup? [y/N]: " answer
+
+            case "$answer" in
+              y|Y|yes|YES)
+                ;;
+              *)
+                echo "Backup cancelled."
+                exit 0
+                ;;
+            esac
+
+            echo "Requesting graceful Minecraft shutdown..."
+
+            kill -TERM "$pid"
+
+            for _ in $(seq 1 120); do
+              if ! kill -0 "$pid" 2>/dev/null; then
+                echo "Minecraft has stopped cleanly."
+                rm -f "$PID_FILE"
+                return
+              fi
+              sleep 1
+            done
+
+            echo "::error::Minecraft did not stop within 120 seconds."
+            echo "The backup was not created."
+            exit 1
+          }
+
+          get_github_pat() {
+            GITHUB_PAT="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"
+          }
+
+          get_release_id() {
+            local release_json
+            local release_id
+
+            release_json="$(
+              curl \
+                --fail \
+                --show-error \
+                --silent \
+                --location \
+                --retry 5 \
+                --retry-delay 2 \
+                --retry-all-errors \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer $GITHUB_PAT" \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+            )"
+
+            release_id="$(
+              printf '%s' "$release_json" |
+                python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])'
+            )"
+
+            [[ "$release_id" =~ ^[0-9]+$ ]] || {
+              echo "ERROR: Could not determine the GitHub Release ID."
+              exit 1
+            }
+
+            printf '%s\n' "$release_id"
+          }
+
+          install_dependencies true
+
+          running_pid=""
+          if running_pid="$(find_running_server_pid)"; then
+            stop_minecraft_cleanly "$running_pid"
+          else
+            rm -f "$PID_FILE"
+          fi
+
+          test -f "$BASE_DIR/server.jar"
+          test -f "$BASE_DIR/server.properties"
+          test -f "$BASE_DIR/eula.txt"
+          test -f "$BASE_DIR/world/level.dat"
+          test -x "$BASE_DIR/start.sh"
+
+          get_github_pat
+
+          RELEASE_ID="$(get_release_id)"
+
+          TIMESTAMP="$(date -u '+%Y%m%d-%H%M%S')"
+          ARCHIVE_NAME="${SAFE_NAME}-progress-${TIMESTAMP}.zip"
+          TEMP_ROOT="$(mktemp -d)"
+          STAGE_DIR="$TEMP_ROOT/server"
+          ARCHIVE_PATH="$TEMP_ROOT/$ARCHIVE_NAME"
+
+          cleanup() {
+            rm -rf "$TEMP_ROOT"
+          }
+          trap cleanup EXIT
+
+          mkdir -p "$STAGE_DIR"
+
+          echo "Creating a clean backup staging copy..."
+          cp -a "$BASE_DIR/." "$STAGE_DIR/"
+
+          # Transient files generated during deployment/runtime.
+          rm -rf \
+            "$STAGE_DIR/.java" \
+            "$STAGE_DIR/logs" \
+            "$STAGE_DIR/crash-reports" \
+            "$STAGE_DIR/.backup-work"
+
+          rm -f \
+            "$STAGE_DIR/.minecraft-server.pid" \
+            "$STAGE_DIR/console.pipe" \
+            "$STAGE_DIR/first-run.log" \
+            "$STAGE_DIR/verify.log"
+
+          # Do not preserve the backup archive itself if one somehow exists.
+          find "$STAGE_DIR" -maxdepth 1 -type f -name '*-progress-*.zip' -delete
+
+          # The resource-pack URL is VPS-specific. start.sh will rebuild it
+          # using the new VPS public IP when this server is deployed again.
+          if [ -f "$STAGE_DIR/server.properties" ]; then
+            sed -i 's|^resource-pack=.*|resource-pack=|' "$STAGE_DIR/server.properties"
+          fi
+
+          # The PID file and runtime Java installation are not part of the
+          # persistent server state.
+          rm -f "$STAGE_DIR/.minecraft-server.pid"
+          rm -rf "$STAGE_DIR/.java"
+
+          echo "Compressing server directory..."
+          (
+            cd "$STAGE_DIR"
+            zip -qr -6 "$ARCHIVE_PATH" .
+          )
+
+          test -s "$ARCHIVE_PATH"
+
+          size_bytes="$(stat -c '%s' "$ARCHIVE_PATH")"
+          if [ "$size_bytes" -ge "$MAX_BYTES" ]; then
+            echo "::error::Progress backup is not below the 2 GiB GitHub Release asset limit."
+            exit 1
+          fi
+
+          echo
+          echo "Backup created: $ARCHIVE_NAME"
+          ls -lh "$ARCHIVE_PATH"
+          echo "Uploading to GitHub Release:"
+          echo "  Repository: $GITHUB_REPOSITORY"
+          echo "  Release tag: $RELEASE_TAG"
+          echo
+
+          UPLOAD_URL="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets"
+
+          curl \
+            --fail \
+            --show-error \
+            --location \
+            --retry 5 \
+            --retry-delay 2 \
+            --retry-all-errors \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GITHUB_PAT" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            -H "Content-Type: application/zip" \
+            --data-binary "@$ARCHIVE_PATH" \
+            "${UPLOAD_URL}?name=${ARCHIVE_NAME}"
+
+          echo
+          echo "Progress backup uploaded successfully."
+          echo "Asset: ${ARCHIVE_NAME}"
+          echo "Release: https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}"
+          SCRIPT
+
+          sed -i "s|__SERVER_NAME__|$(printf '%s' "$SERVER_NAME" | sed 's/[&|]/\\&/g')|g" backup.sh
+          sed -i "s|__SAFE_NAME__|$SAFE_NAME|g" backup.sh
+          sed -i "s|__MC_VERSION__|$MC_VERSION|g" backup.sh
+          sed -i "s|__GITHUB_REPOSITORY__|$GITHUB_REPOSITORY|g" backup.sh
+          sed -i "s|__RELEASE_TAG__|$RELEASE_TAG|g" backup.sh
+
+          chmod +x backup.sh
+
+      - name: Clean and validate final server
+        working-directory: build/server
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f first-run.log verify.log console.pipe .minecraft-server.pid
+          rm -rf logs crash-reports .java
+          test -s server.jar
+          test -f world/level.dat
+          test -f eula.txt
+          test -f server.properties
+          test -x start.sh
+          test -x backup.sh
+          if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then
+            test -s resource-pack-host/resource-pack.zip
+          fi
+
+      - name: Package server ZIP
+        env:
+          SERVER_NAME: ${{ inputs.name }}
+          MC_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SAFE_NAME="$(printf '%s' "$SERVER_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g; s/-\+/-/g; s/^-//; s/-$//')"
+          [ -n "$SAFE_NAME" ] || SAFE_NAME=minecraft-server
+
+          RELEASE_TAG="${SAFE_NAME}-${MC_VERSION}"
+          ZIP_NAME="${SAFE_NAME}-${{ github.run_id }}-${{ github.run_attempt }}.zip"
 
           rm -rf build/package
           mkdir -p "build/package/$SAFE_NAME"
@@ -664,13 +1020,16 @@ jobs:
 
           size_bytes="$(stat -c '%s' "$ZIP_NAME")"
           max_bytes=$((2 * 1024 * 1024 * 1024))
+
           if [ "$size_bytes" -ge "$max_bytes" ]; then
             echo "::error::Server ZIP is not below the 2 GiB GitHub Release asset limit."
             exit 1
           fi
 
           echo "SAFE_NAME=$SAFE_NAME" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
           echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+
           ls -lh "$ZIP_NAME"
 
       - name: Publish GitHub Release and upload ZIP
@@ -678,7 +1037,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           token: ${{ github.token }}
-          tag_name: ${{ env.SAFE_NAME }}-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ inputs.name }} — Minecraft ${{ inputs.version }}
           body: |
             ${{ inputs.description }}
@@ -686,7 +1045,12 @@ jobs:
             ## Server download
 
             The exact VPS commands are added automatically after the ZIP is uploaded.
+
+            ## Progress backups
+
+            Run `./backup.sh` from the extracted server directory to create a timestamped progress backup and upload it as a separate Release asset.
           files: ${{ env.ZIP_NAME }}
+          overwrite_files: false
 
       - name: Get exact release asset URL
         env:
@@ -694,8 +1058,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ASSET_URL="$(printf '%s' "$ASSETS_JSON" | jq -r --arg n "$ZIP_NAME" '.[] | select(.name == $n) | .browser_download_url' | head -n1)"
-          [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ] || { echo "::error::Could not determine release asset browser_download_url."; exit 1; }
+
+          ASSET_URL="$(
+            printf '%s' "$ASSETS_JSON" |
+              jq -r --arg n "$ZIP_NAME" '.[] | select(.name == $n) | .browser_download_url' |
+              head -n1
+          )"
+
+          [ -n "$ASSET_URL" ] &&
+          [ "$ASSET_URL" != "null" ] || {
+            echo "::error::Could not determine release asset browser_download_url."
+            exit 1
+          }
+
           echo "ASSET_URL=$ASSET_URL" >> "$GITHUB_ENV"
 
       - name: Write exact VPS instructions into release description
@@ -707,15 +1082,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${SAFE_NAME}-${MC_VERSION}-${{ github.run_id }}-${{ github.run_attempt }}"
+
+          TAG="${RELEASE_TAG}"
 
           {
             printf '%s\n\n' "$USER_DESCRIPTION"
+
             echo "## Server information"
             echo
             echo "- **Name:** $SERVER_NAME"
             echo "- **Minecraft version:** $MC_VERSION"
             echo "- **Java:** Java $JAVA_VERSION"
+
             if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then
               echo "- **Resource pack:** Included; start.sh serves it locally on TCP 8080"
               if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
@@ -726,6 +1104,7 @@ jobs:
             else
               echo "- **Resource pack:** None"
             fi
+
             echo "- **Map-friendly defaults:** command blocks enabled, flight allowed, spawn protection disabled, online authentication disabled"
             echo
             echo "## Exact commands for a fresh Linux VPS"
@@ -750,9 +1129,9 @@ jobs:
             printf "cd '%s'\n" "$SAFE_NAME"
             echo '```'
             echo
-            echo "### 5. Ensure the start script is executable"
+            echo "### 5. Ensure the scripts are executable"
             echo '```bash'
-            echo 'chmod +x start.sh'
+            echo 'chmod +x start.sh backup.sh'
             echo '```'
             echo
             echo "### 6. Start the server"
@@ -761,6 +1140,28 @@ jobs:
             echo '```'
             echo
             echo "The start script installs/downloads the exact required Java major version and then asks for minimum and maximum RAM in whole GB."
+            echo
+            echo "## Save your progress"
+            echo
+            echo "When you want to create a persistent progress backup, stop or save your work and run:"
+            echo '```bash'
+            echo './backup.sh'
+            echo '```'
+            echo
+            echo "If Minecraft is still running, backup.sh will ask permission to stop it cleanly before creating the backup."
+            echo "The resulting timestamped ZIP is uploaded as a separate asset to this same GitHub Release."
+            echo "backup.sh does not preserve the runtime Java installation, logs, PID file, temporary verification files, or the previous VPS-specific resource-pack URL."
+            echo
+            echo "### GitHub authentication for backup.sh"
+            echo
+            echo "Set GITHUB_PAT before running backup.sh, or allow backup.sh to securely prompt for it:"
+            echo '```bash'
+            echo 'export GITHUB_PAT="YOUR_FINE_GRAINED_PAT"'
+            echo './backup.sh'
+            echo '```'
+            echo
+            echo "The PAT must have repository Contents: write access for this repository."
+            
             if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then
               echo
               echo "### Resource-pack networking"
@@ -776,5 +1177,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="${SAFE_NAME}-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}"
-          gh release view "$TAG" --json url,name --jq '"Release: \(.name)\nURL: \(.url)"'
+          gh release view "$RELEASE_TAG" --json url,name --jq '"Release: \(.name)\nURL: \(.url)"'
