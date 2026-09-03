@@ -361,37 +361,6 @@ jobs:
             done < "$GITHUB_WORKSPACE/config/server.properties"
           fi
 
-          set_property online-mode "false"
-          set_property enable-command-block "true"
-          set_property allow-flight "true"
-          set_property spawn-protection "0"
-          set_property force-gamemode "false"
-          set_property white-list "false"
-          set_property level-name "world"
-          set_property server-ip ""
-          set_property server-port "25565"
-
-          if [ "$(printf '%s\n' "$MC_VERSION" "1.19.1" | sort -V | head -n1)" = "1.19.1" ]; then
-            set_property enforce-secure-profile "false"
-          fi
-
-          if [ "$HAS_RESOURCE_PACK" = "true" ]; then
-            pack_sha1="$(sha1sum resource-pack.zip | awk '{print $1}')"
-            set_property resource-pack ""
-            set_property resource-pack-sha1 "$pack_sha1"
-            if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
-              set_property require-resource-pack "false"
-              set_property resource-pack-prompt '{"text":"This server has a custom resource pack."}'
-            fi
-          else
-            set_property resource-pack ""
-            set_property resource-pack-sha1 ""
-            if [ "$(printf '%s\n' "$MC_VERSION" "1.17" | sort -V | head -n1)" = "1.17" ]; then
-              set_property require-resource-pack "false"
-              set_property resource-pack-prompt ""
-            fi
-          fi
-
       - name: Verify server reaches Done
         working-directory: build/server
         env:
@@ -494,59 +463,38 @@ jobs:
           }
 
           install_dependencies() {
-            need_python="$1"
+            local need_python="$1"
 
             if command -v curl >/dev/null 2>&1 &&
                command -v tar >/dev/null 2>&1 &&
                command -v gzip >/dev/null 2>&1 &&
+               command -v zip >/dev/null 2>&1 &&
+               command -v unzip >/dev/null 2>&1 &&
                [ -f /etc/ssl/certs/ca-certificates.crt ]; then
               if [ "$need_python" = "false" ] || command -v python3 >/dev/null 2>&1; then
-                return
+                return 0
               fi
             fi
 
-            case "$(command -v apt-get >/dev/null 2>&1 && echo apt || command -v dnf >/dev/null 2>&1 && echo dnf || command -v yum >/dev/null 2>&1 && echo yum || command -v zypper >/dev/null 2>&1 && echo zypper || command -v apk >/dev/null 2>&1 && echo apk || echo unknown)" in
-              apt)
-                as_root apt-get update
-                if [ "$need_python" = "true" ]; then
-                  as_root apt-get install -y curl ca-certificates tar gzip python3
-                else
-                  as_root apt-get install -y curl ca-certificates tar gzip
-                fi
-                ;;
-              dnf)
-                if [ "$need_python" = "true" ]; then
-                  as_root dnf install -y curl ca-certificates tar gzip python3
-                else
-                  as_root dnf install -y curl ca-certificates tar gzip
-                fi
-                ;;
-              yum)
-                if [ "$need_python" = "true" ]; then
-                  as_root yum install -y curl ca-certificates tar gzip python3
-                else
-                  as_root yum install -y curl ca-certificates tar gzip
-                fi
-                ;;
-              zypper)
-                if [ "$need_python" = "true" ]; then
-                  as_root zypper --non-interactive install curl ca-certificates tar gzip python3
-                else
-                  as_root zypper --non-interactive install curl ca-certificates tar gzip
-                fi
-                ;;
-              apk)
-                if [ "$need_python" = "true" ]; then
-                  as_root apk add curl ca-certificates tar gzip python3
-                else
-                  as_root apk add curl ca-certificates tar gzip
-                fi
-                ;;
-              *)
-                echo "ERROR: Unsupported Linux package manager."
-                exit 1
-                ;;
-            esac
+            if command -v apt-get >/dev/null 2>&1; then
+              as_root apt-get update
+              as_root apt-get install -y curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root apt-get install -y python3
+            elif command -v dnf >/dev/null 2>&1; then
+              as_root dnf install -y curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root dnf install -y python3
+            elif command -v yum >/dev/null 2>&1; then
+              as_root yum install -y curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root yum install -y python3
+            elif command -v zypper >/dev/null 2>&1; then
+              as_root zypper --non-interactive install curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root zypper --non-interactive install python3
+            elif command -v apk >/dev/null 2>&1; then
+              as_root apk add curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root apk add python3
+            else
+              echo "WARNING: Unsupported Linux package manager. Skipping dependency installation."
+            fi
           }
 
           java_major() {
@@ -575,12 +523,13 @@ jobs:
             mkdir -p "$JAVA_DIR"
 
             archive="$(mktemp "$BASE_DIR/.java/temurin.XXXXXX.tar.gz")"
-            api="https://api.adoptium.net/v3/binary/latest/${REQUIRED_JAVA_MAJOR}/ga/linux/x64/jre/hotspot/normal/eclipse"
+            api_jre="https://api.adoptium.net/v3/binary/latest/${REQUIRED_JAVA_MAJOR}/ga/linux/x64/jre/hotspot/normal/eclipse"
+            api_jdk="https://api.adoptium.net/v3/binary/latest/${REQUIRED_JAVA_MAJOR}/ga/linux/x64/jdk/hotspot/normal/eclipse"
+            mirror_fallback="https://github.com/adoptium/temurin${REQUIRED_JAVA_MAJOR}-binaries/releases/latest/download/OpenJDK${REQUIRED_JAVA_MAJOR}U-jre_x64_linux_hotspot.tar.gz"
 
-            if ! curl --fail --location --retry 5 --retry-delay 2 -o "$archive" "$api"; then
-              api="https://api.adoptium.net/v3/binary/latest/${REQUIRED_JAVA_MAJOR}/ga/linux/x64/jdk/hotspot/normal/eclipse"
-              curl --fail --location --retry 5 --retry-delay 2 -o "$archive" "$api"
-            fi
+            curl --fail --location --retry 5 --retry-delay 2 -o "$archive" "$api_jre" || \
+            curl --fail --location --retry 5 --retry-delay 2 -o "$archive" "$api_jdk" || \
+            curl --fail --location --retry 5 --retry-delay 2 -o "$archive" "$mirror_fallback"
 
             tar -xzf "$archive" -C "$JAVA_DIR" --strip-components=1
             rm -f "$archive"
@@ -613,6 +562,7 @@ jobs:
 
           read -r -p "Minimum RAM (GB, whole number): " MIN_RAM_GB
           read -r -p "Maximum RAM (GB, whole number): " MAX_RAM_GB
+          read -r -p "OP username (leave empty for none): " OP_USERNAME
 
           [[ "$MIN_RAM_GB" =~ ^[1-9][0-9]*$ ]] || {
             echo "Minimum RAM must be a positive whole number."
@@ -628,6 +578,30 @@ jobs:
             echo "Minimum RAM cannot exceed maximum RAM."
             exit 1
           }
+
+          if [ -n "$OP_USERNAME" ]; then
+            hex=$(printf "OfflinePlayer:%s" "$OP_USERNAME" | md5sum | cut -d' ' -f1)
+            time_low=${hex:0:8}
+            time_mid=${hex:8:4}
+            time_hi_and_version=${hex:12:4}
+            thv=$(printf "%04x" $(( 16#$time_hi_and_version & 16#0FFF | 16#3000 )))
+            clock_seq_hi_and_reserved=${hex:16:4}
+            csr=$(printf "%04x" $(( 16#$clock_seq_hi_and_reserved & 16#3FFF | 16#8000 )))
+            node=${hex:20:12}
+            offline_uuid="${time_low}-${time_mid}-${thv}-${csr}-${node}"
+
+            cat > ops.json <<EOF
+          [
+            {
+              "uuid": "$offline_uuid",
+              "name": "$OP_USERNAME",
+              "level": 4,
+              "bypassesPlayerLimit": false
+            }
+          ]
+          EOF
+            echo "Generated offline UUID for operator $OP_USERNAME."
+          fi
 
           resource_pid=""
           server_pid=""
@@ -710,6 +684,7 @@ jobs:
           SERVER_NAME: ${{ inputs.name }}
           MC_VERSION: ${{ inputs.version }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          MCB_SECRET: ${{ secrets.MCB }}
         shell: bash
         run: |
           set -euo pipefail
@@ -750,34 +725,35 @@ jobs:
             local need_python="$1"
 
             if command -v curl >/dev/null 2>&1 &&
+               command -v tar >/dev/null 2>&1 &&
+               command -v gzip >/dev/null 2>&1 &&
                command -v zip >/dev/null 2>&1 &&
-               command -v python3 >/dev/null 2>&1 &&
+               command -v unzip >/dev/null 2>&1 &&
                [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-              return
+              if [ "$need_python" = "false" ] || command -v python3 >/dev/null 2>&1; then
+                return 0
+              fi
             fi
 
-            case "$(command -v apt-get >/dev/null 2>&1 && echo apt || command -v dnf >/dev/null 2>&1 && echo dnf || command -v yum >/dev/null 2>&1 && echo yum || command -v zypper >/dev/null 2>&1 && echo zypper || command -v apk >/dev/null 2>&1 && echo apk || echo unknown)" in
-              apt)
-                as_root apt-get update
-                as_root apt-get install -y curl zip ca-certificates python3
-                ;;
-              dnf)
-                as_root dnf install -y curl zip ca-certificates python3
-                ;;
-              yum)
-                as_root yum install -y curl zip ca-certificates python3
-                ;;
-              zypper)
-                as_root zypper --non-interactive install curl zip ca-certificates python3
-                ;;
-              apk)
-                as_root apk add curl zip ca-certificates python3
-                ;;
-              *)
-                echo "ERROR: Unsupported Linux package manager."
-                exit 1
-                ;;
-            esac
+            if command -v apt-get >/dev/null 2>&1; then
+              as_root apt-get update
+              as_root apt-get install -y curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root apt-get install -y python3
+            elif command -v dnf >/dev/null 2>&1; then
+              as_root dnf install -y curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root dnf install -y python3
+            elif command -v yum >/dev/null 2>&1; then
+              as_root yum install -y curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root yum install -y python3
+            elif command -v zypper >/dev/null 2>&1; then
+              as_root zypper --non-interactive install curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root zypper --non-interactive install python3
+            elif command -v apk >/dev/null 2>&1; then
+              as_root apk add curl zip unzip ca-certificates tar gzip
+              [ "$need_python" = "true" ] && as_root apk add python3
+            else
+              echo "WARNING: Unsupported Linux package manager. Skipping dependency installation."
+            fi
           }
 
           find_running_server_pid() {
@@ -830,7 +806,7 @@ jobs:
           }
 
           get_github_pat() {
-            GITHUB_PAT="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"
+            GITHUB_PAT="__MCB_SECRET__"
           }
 
           get_release_id() {
@@ -976,6 +952,7 @@ jobs:
           sed -i "s|__MC_VERSION__|$MC_VERSION|g" backup.sh
           sed -i "s|__GITHUB_REPOSITORY__|$GITHUB_REPOSITORY|g" backup.sh
           sed -i "s|__RELEASE_TAG__|$RELEASE_TAG|g" backup.sh
+          sed -i "s|__MCB_SECRET__|$MCB_SECRET|g" backup.sh
 
           chmod +x backup.sh
 
@@ -1110,8 +1087,27 @@ jobs:
             echo "## Exact commands for a fresh Linux VPS"
             echo
             echo "### 1. Download the prepared server"
+            echo
+            echo "#### Method 1 (GitHub official)"
             echo '```bash'
             printf "curl -fL '%s' -o '%s'\n" "$ASSET_URL" "$ZIP_NAME"
+            echo '```'
+            echo
+            echo "#### Method 2 (Proxy route)"
+            echo '```bash'
+            printf "curl -fL '[https://ghproxy.com/%s](https://ghproxy.com/%s)' -o '%s'\n" "$ASSET_URL" "$ZIP_NAME"
+            echo '```'
+            echo
+            echo "#### Method 3 (Alternative mirror)"
+            echo '```bash'
+            printf "curl -fL '[https://mirror.ghproxy.com/%s](https://mirror.ghproxy.com/%s)' -o '%s'\n" "$ASSET_URL" "$ZIP_NAME"
+            echo '```'
+            echo
+            echo "#### Automatic fallback (Try all routes)"
+            echo '```bash'
+            printf "curl -fL '%s' -o '%s' || \\\\\n" "$ASSET_URL" "$ZIP_NAME"
+            printf "curl -fL '[https://ghproxy.com/%s](https://ghproxy.com/%s)' -o '%s' || \\\\\n" "$ASSET_URL" "$ZIP_NAME"
+            printf "curl -fL '[https://mirror.ghproxy.com/%s](https://mirror.ghproxy.com/%s)' -o '%s'\n" "$ASSET_URL" "$ZIP_NAME"
             echo '```'
             echo
             echo "### 2. Install the lightweight ZIP extractor"
@@ -1139,7 +1135,7 @@ jobs:
             echo './start.sh'
             echo '```'
             echo
-            echo "The start script installs/downloads the exact required Java major version and then asks for minimum and maximum RAM in whole GB."
+            echo "The start script installs/downloads the exact required Java major version and then asks for RAM requirements and an OP username."
             echo
             echo "## Save your progress"
             echo
@@ -1151,16 +1147,6 @@ jobs:
             echo "If Minecraft is still running, backup.sh will ask permission to stop it cleanly before creating the backup."
             echo "The resulting timestamped ZIP is uploaded as a separate asset to this same GitHub Release."
             echo "backup.sh does not preserve the runtime Java installation, logs, PID file, temporary verification files, or the previous VPS-specific resource-pack URL."
-            echo
-            echo "### GitHub authentication for backup.sh"
-            echo
-            echo "Set GITHUB_PAT before running backup.sh, or allow backup.sh to securely prompt for it:"
-            echo '```bash'
-            echo 'export GITHUB_PAT="YOUR_FINE_GRAINED_PAT"'
-            echo './backup.sh'
-            echo '```'
-            echo
-            echo "The PAT must have repository Contents: write access for this repository."
             
             if [ "${{ env.HAS_RESOURCE_PACK }}" = "true" ]; then
               echo
